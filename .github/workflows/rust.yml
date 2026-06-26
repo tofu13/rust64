@@ -27,6 +27,7 @@ jobs:
       name: Get SDL2 for MacOS
       run: |
         brew install SDL2
+        echo "LIBRARY_PATH=$(brew --prefix SDL2)/lib" >> $GITHUB_ENV
     - if: matrix.os == 'windows-latest'
       name: Get SDL2 for Windows
       shell: pwsh
