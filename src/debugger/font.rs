@@ -35,14 +35,14 @@ impl SysFont {
     pub fn draw_text_rgb(&self, window_buffer: &mut Vec<u32>, window_w: usize, x: usize, y: usize, text: &str, color: u32) {
         let chars: Vec<char> = text.chars().collect();
         for i in 0..text.len() {
-            self.draw_char_rgb(window_buffer, window_w, x*8 + 8*i as usize, y*8 as usize, self.ascii_to_petscii(chars[i]), color);
+            self.draw_char_rgb(window_buffer, window_w, x*8 + 8*i as usize, y*8 as usize, utils::ascii_to_petscii(chars[i]), color);
         }
     }    
     
     pub fn draw_text(&self, window_buffer: &mut Vec<u32>, window_w: usize, x: usize, y: usize, text: &str, c64_color: u8) {
         let chars: Vec<char> = text.chars().collect();
         for i in 0..text.len() {
-            self.draw_char(window_buffer, window_w, x*8 + 8*i as usize, y*8 as usize, self.ascii_to_petscii(chars[i]), c64_color);
+            self.draw_char(window_buffer, window_w, x*8 + 8*i as usize, y*8 as usize, utils::ascii_to_petscii(chars[i]), c64_color);
         }
     }
     
@@ -67,73 +67,6 @@ impl SysFont {
             }
             l = 0;
             k += 1;
-        }
-    }
-
-    fn ascii_to_petscii(&self, c_ascii: char) -> u8 {
-        match c_ascii {
-            '@' => 0,
-            'A' | 'a' => 1,
-            'B' | 'b' => 2,
-            'C' | 'c' => 3,
-            'D' | 'd' => 4,
-            'E' | 'e' => 5,
-            'F' | 'f' => 6,
-            'G' | 'g' => 7,
-            'H' | 'h' => 8,
-            'I' | 'i' => 9,
-            'J' | 'j' => 10,
-            'K' | 'k' => 11,
-            'L' | 'l' => 12,
-            'M' | 'm' => 13,
-            'N' | 'n' => 14,
-            'O' | 'o' => 15,
-            'P' | 'p' => 16,
-            'Q' | 'q' => 17,
-            'R' | 'r' => 18,
-            'S' | 's' => 19,
-            'T' | 't' => 20,
-            'U' | 'u' => 21,
-            'V' | 'v' => 22,
-            'W' | 'w' => 23,
-            'X' | 'x' => 24,
-            'Y' | 'y' => 25,
-            'Z' | 'z'=> 26,
-            '[' => 27,
-            ']' => 29,
-            ' ' => 32,
-            '!' => 33,
-            '"' => 34,
-            '#' => 35,
-            '$' => 36,
-            '%' => 37,
-            '&' => 38,
-            '`' => 39,
-            '(' => 40,
-            ')' => 41,
-            '*' => 42,
-            '+' => 43,
-            ',' => 44,
-            '-' => 45,
-            '.' => 46,
-            '/' => 47,
-            '0' => 48,
-            '1' => 49,
-            '2' => 50,
-            '3' => 51,
-            '4' => 52,
-            '5' => 53,
-            '6' => 54,
-            '7' => 55,
-            '8' => 56,
-            '9' => 57,
-            ':' => 58,
-            ';' => 59,
-            '<' => 60,
-            '=' => 61,
-            '>' => 62,
-            '?' => 63,
-            _ => 63
         }
     }
 }

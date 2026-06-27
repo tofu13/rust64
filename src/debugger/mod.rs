@@ -1,7 +1,7 @@
 // memory debug window
 extern crate minifb;
 
-mod font;
+pub mod font;
 
 use c64;
 use minifb::*;

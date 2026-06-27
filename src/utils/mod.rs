@@ -96,7 +96,7 @@ impl OpDebugger {
 pub fn debug_instruction(opcode: u8, cpu: &mut cpu::CPU) {
     cpu.prev_pc = cpu.pc;
     let prev_pc = cpu.prev_pc;
-    
+
     let operand_hex: String;
     let operand: String;
     let mut extra_cycle = false;
@@ -136,7 +136,7 @@ pub fn debug_instruction(opcode: u8, cpu: &mut cpu::CPU) {
         },
         opcodes::AddrMode::Immediate => {
             operand_hex = format!(" {:02X}    ", cpu.read_byte(prev_pc));
-            operand = format!("#${:02X}   ", cpu.read_byte(prev_pc)); 
+            operand = format!("#${:02X}   ", cpu.read_byte(prev_pc));
         },
         opcodes::AddrMode::Absolute => {
             operand_hex = format!(" {:02X} {:02X} ", cpu.read_byte(prev_pc), cpu.read_byte(prev_pc + 0x01));
@@ -155,7 +155,7 @@ pub fn debug_instruction(opcode: u8, cpu: &mut cpu::CPU) {
         opcodes::AddrMode::Zeropage => {
             operand_hex = format!(" {:02X}    ", cpu.read_byte(prev_pc));
             operand = format!("${:02X}    ", cpu.read_byte(prev_pc));
-        }, 
+        },
         opcodes::AddrMode::ZeropageIndexedX => {
             operand_hex = format!(" {:02X}    ", cpu.read_byte(prev_pc));
             operand = format!("${:02X},X  ", cpu.read_byte(prev_pc));
@@ -197,10 +197,10 @@ pub fn debug_instruction(opcode: u8, cpu: &mut cpu::CPU) {
         total_cycles += 1;
         fetch_cycles += 1;
     }
-    
+
     let rmw_mark = if cpu.instruction.cycles_to_rmw > 0 { "+" } else { " " };
 
-    println!("${:04X}: {:02X}{}{}{} {}  {}<- A: {:02X} X: {:02X} Y: {:02X} SP: {:02X} 00: {:02X} 01: {:02X} NV-BDIZC: [{:08b}] ({} cls, f: {}, r: {})", cpu.prev_pc - 1, opcode, operand_hex, extra_cycle_mark, cpu.instruction, operand,rmw_mark, cpu.a, cpu.x, cpu.y, cpu.sp, byte0, byte1, cpu.p, total_cycles, fetch_cycles, cpu.instruction.cycles_to_run);
+    println!("${:04X}: {:02X}{}{}{} {}  {}<- A: {:02X} X: {:02X} Y: {:02X} SP: {:02X} 00: {:02X} 01: {:02X} NV-BDIZC: [{:08b}] ({} cls, f: {}, r: {})", cpu.prev_pc - 1, opcode, operand_hex, extra_cycle_mark, cpu.instruction, operand, rmw_mark, cpu.a, cpu.x, cpu.y, cpu.sp, byte0, byte1, cpu.p, total_cycles, fetch_cycles, cpu.instruction.cycles_to_run);
 
     // JSR? push on queue to supress logging
     if !debug_loops {
@@ -210,4 +210,69 @@ pub fn debug_instruction(opcode: u8, cpu: &mut cpu::CPU) {
         }
     }
 }
-
+pub fn ascii_to_petscii(c_ascii: char) -> u8 {
+    match c_ascii {
+        '@' => 0,
+        'A' | 'a' => 1,
+        'B' | 'b' => 2,
+        'C' | 'c' => 3,
+        'D' | 'd' => 4,
+        'E' | 'e' => 5,
+        'F' | 'f' => 6,
+        'G' | 'g' => 7,
+        'H' | 'h' => 8,
+        'I' | 'i' => 9,
+        'J' | 'j' => 10,
+        'K' | 'k' => 11,
+        'L' | 'l' => 12,
+        'M' | 'm' => 13,
+        'N' | 'n' => 14,
+        'O' | 'o' => 15,
+        'P' | 'p' => 16,
+        'Q' | 'q' => 17,
+        'R' | 'r' => 18,
+        'S' | 's' => 19,
+        'T' | 't' => 20,
+        'U' | 'u' => 21,
+        'V' | 'v' => 22,
+        'W' | 'w' => 23,
+        'X' | 'x' => 24,
+        'Y' | 'y' => 25,
+        'Z' | 'z'=> 26,
+        '[' => 27,
+        ']' => 29,
+        ' ' => 32,
+        '!' => 33,
+        '"' => 34,
+        '#' => 35,
+        '$' => 36,
+        '%' => 37,
+        '&' => 38,
+        '`' => 39,
+        '(' => 40,
+        ')' => 41,
+        '*' => 42,
+        '+' => 43,
+        ',' => 44,
+        '-' => 45,
+        '.' => 46,
+        '/' => 47,
+        '0' => 48,
+        '1' => 49,
+        '2' => 50,
+        '3' => 51,
+        '4' => 52,
+        '5' => 53,
+        '6' => 54,
+        '7' => 55,
+        '8' => 56,
+        '9' => 57,
+        ':' => 58,
+        ';' => 59,
+        '<' => 60,
+        '=' => 61,
+        '>' => 62,
+        '?' => 63,
+        _ => 63
+    }
+}
