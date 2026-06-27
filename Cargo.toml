@@ -10,7 +10,7 @@ time = "0.3.49"
 byteorder = "1.2.2"
 enum_primitive = "0.1"
 num = "0.4"
-
+hjkl-clipboard = "0.33.2"
 
 [target.'cfg(not(target_os = "redox"))'.dependencies]
 sdl2 = "0.38.0"
