@@ -204,6 +204,16 @@ impl C64 {
                 if self.io.check_restore_key(&self.main_window) {
                     self.cpu.borrow_mut().set_nmi(true);
                 }
+                // press F10 to paste buffer
+                if self.main_window.is_key_pressed(Key::F10, KeyRepeat::No) {
+                    let ctx = Clipboard::new().unwrap();
+                    self.paste_buffer = String::from_utf8_lossy(
+                        &ctx.get(Selection::Clipboard, MimeType::Text)
+                            .unwrap_or(vec![]),
+                    )
+                    .chars()
+                    .collect()
+                }
                 // Inject char from paste buffer
                 if (!self.paste_buffer.is_empty()) && self.memory.borrow_mut().read_byte(0xC6) < 11
                 {
