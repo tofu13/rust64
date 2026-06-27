@@ -43,6 +43,8 @@ pub struct C64 {
     powered_on: bool,
     boot_complete: bool,
     cycle_count: u32,
+
+    paste_buffer: Vec<char>
 }
 
 impl C64 {
@@ -70,6 +72,8 @@ impl C64 {
             powered_on: false,
             boot_complete: false,
             cycle_count: 0,
+
+            paste_buffer: vec!()
         };
 
         c64.main_window.set_position(75, 20);
@@ -167,6 +171,13 @@ impl C64 {
                 if self.io.check_restore_key(&self.main_window) {
                     self.cpu.borrow_mut().set_nmi(true);
                 }
+                // Inject char from paste buffer
+                if (self.paste_buffer.len() >0) && self.memory.borrow_mut().read_byte(0xC6) < 11 {
+                    let char = self.paste_buffer.remove(0);
+                    let index = self.memory.borrow_mut().read_byte(0xC6);
+                    self.memory.borrow_mut().write_byte(0x0277 + index as u16, utils::char_to_petscii(char));
+                    self.memory.borrow_mut().write_byte(0xC6, index + 1);
+                }
             }
 
             // process special keys: console ASM output and reset switch
@@ -177,6 +188,11 @@ impl C64 {
 
             if self.main_window.is_key_pressed(Key::F12, KeyRepeat::No) {
                 self.reset();
+            }
+
+            // press F10 to paste buffer
+            if self.main_window.is_key_pressed(Key::F10, KeyRepeat::No) {
+                self.paste_buffer = "print TI$\n".chars().collect()
             }
 
             self.cycle_count += 1;
