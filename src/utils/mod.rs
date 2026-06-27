@@ -219,12 +219,81 @@ pub fn debug_instruction(opcode: u8, cpu: &mut cpu::CPU) {
         " "
     };
 
-    println!("${:04X}: {:02X}{}{}{} {}  {}<- A: {:02X} X: {:02X} Y: {:02X} SP: {:02X} 00: {:02X} 01: {:02X} NV-BDIZC: [{:08b}] ({} cls, f: {}, r: {})", cpu.prev_pc - 1, opcode, operand_hex, extra_cycle_mark, cpu.instruction, operand,rmw_mark, cpu.a, cpu.x, cpu.y, cpu.sp, byte0, byte1, cpu.p, total_cycles, fetch_cycles, cpu.instruction.cycles_to_run);
+    println!("${:04X}: {:02X}{}{}{} {}  {}<- A: {:02X} X: {:02X} Y: {:02X} SP: {:02X} 00: {:02X} 01: {:02X} NV-BDIZC: [{:08b}] ({} cls, f: {}, r: {})", cpu.prev_pc - 1, opcode, operand_hex, extra_cycle_mark, cpu.instruction, operand, rmw_mark, cpu.a, cpu.x, cpu.y, cpu.sp, byte0, byte1, cpu.p, total_cycles, fetch_cycles, cpu.instruction.cycles_to_run);
 
     // JSR? push on queue to supress logging
     if !debug_loops {
         if let opcodes::Op::JSR = cpu.instruction.opcode {
             cpu.op_debugger.jump_queue.push(opcode)
         }
+    }
+}
+pub fn char_to_petscii(character: char) -> u8 {
+    // This looks petscii compliant
+    match character {
+        '\n' => 13,
+        ' ' => 32,
+        '!' => 33,
+        '"' => 34,
+        '#' => 35,
+        '$' => 36,
+        '%' => 37,
+        '&' => 38,
+        '`' => 39,
+        '(' => 40,
+        ')' => 41,
+        '*' => 42,
+        '+' => 43,
+        ',' => 44,
+        '-' => 45,
+        '.' => 46,
+        '/' => 47,
+        '0' => 48,
+        '1' => 49,
+        '2' => 50,
+        '3' => 51,
+        '4' => 52,
+        '5' => 53,
+        '6' => 54,
+        '7' => 55,
+        '8' => 56,
+        '9' => 57,
+        ':' => 58,
+        ';' => 59,
+        '<' => 60,
+        '=' => 61,
+        '>' => 62,
+        '?' => 63,
+        '@' => 64,
+        'A' | 'a' => 65,
+        'B' | 'b' => 66,
+        'C' | 'c' => 67,
+        'D' | 'd' => 68,
+        'E' | 'e' => 69,
+        'F' | 'f' => 70,
+        'G' | 'g' => 71,
+        'H' | 'h' => 72,
+        'I' | 'i' => 73,
+        'J' | 'j' => 74,
+        'K' | 'k' => 75,
+        'L' | 'l' => 76,
+        'M' | 'm' => 77,
+        'N' | 'n' => 78,
+        'O' | 'o' => 79,
+        'P' | 'p' => 80,
+        'Q' | 'q' => 81,
+        'R' | 'r' => 82,
+        'S' | 's' => 83,
+        'T' | 't' => 84,
+        'U' | 'u' => 85,
+        'V' | 'v' => 86,
+        'W' | 'w' => 87,
+        'X' | 'x' => 88,
+        'Y' | 'y' => 89,
+        'Z' | 'z' => 90,
+        '[' => 91,
+        '£' => 92,
+        ']' => 93,
+        _ => 63, // That's a '?'
     }
 }
