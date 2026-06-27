@@ -4,6 +4,7 @@ extern crate num;
 
 #[macro_use]
 extern crate enum_primitive;
+extern crate hjkl_clipboard;
 
 #[macro_use]
 mod utils;

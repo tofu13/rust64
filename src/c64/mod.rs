@@ -14,6 +14,7 @@ mod sid;
 mod sid_tables;
 mod vic_tables;
 
+use hjkl_clipboard::{Clipboard, MimeType, Selection};
 use debugger;
 use minifb::*;
 use utils;
@@ -171,12 +172,11 @@ impl C64 {
                 if self.io.check_restore_key(&self.main_window) {
                     self.cpu.borrow_mut().set_nmi(true);
                 }
-                // Inject char from paste buffer
-                if (self.paste_buffer.len() >0) && self.memory.borrow_mut().read_byte(0xC6) < 11 {
-                    let char = self.paste_buffer.remove(0);
-                    let index = self.memory.borrow_mut().read_byte(0xC6);
-                    self.memory.borrow_mut().write_byte(0x0277 + index as u16, utils::char_to_petscii(char));
-                    self.memory.borrow_mut().write_byte(0xC6, index + 1);
+                // press F10 to paste buffer
+                if self.main_window.is_key_pressed(Key::F10, KeyRepeat::No) {
+                    let ctx = Clipboard::new().unwrap();
+                    //print!("{}", ;
+                    self.paste_buffer = String::from_utf8_lossy(&ctx.get(Selection::Clipboard, MimeType::Text).unwrap_or(vec!())).chars().collect()
                 }
             }
 
@@ -189,10 +189,12 @@ impl C64 {
             if self.main_window.is_key_pressed(Key::F12, KeyRepeat::No) {
                 self.reset();
             }
-
-            // press F10 to paste buffer
-            if self.main_window.is_key_pressed(Key::F10, KeyRepeat::No) {
-                self.paste_buffer = "print TI$\n".chars().collect()
+            // Inject char from paste buffer
+            if (self.paste_buffer.len() >0) && self.memory.borrow_mut().read_byte(0xC6) < 11 {
+                let char = self.paste_buffer.remove(0);
+                let index = self.memory.borrow_mut().read_byte(0xC6);
+                self.memory.borrow_mut().write_byte(0x0277 + index as u16, utils::char_to_petscii(char));
+                self.memory.borrow_mut().write_byte(0xC6, index + 1);
             }
 
             self.cycle_count += 1;
