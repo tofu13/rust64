@@ -718,7 +718,9 @@ pub fn run(cpu: &mut cpu::CPU) -> bool {
         }
         Op::ASL => {
             if cpu.ba_low {
-                if let AddrMode::Accumulator = cpu.instruction.addr_mode { return false }
+                if let AddrMode::Accumulator = cpu.instruction.addr_mode {
+                    return false;
+                }
             }
             let v = cpu.get_operand();
             cpu.set_status_flag(cpu::StatusFlag::Carry, (v & 0x80) != 0);
@@ -728,7 +730,9 @@ pub fn run(cpu: &mut cpu::CPU) -> bool {
         }
         Op::LSR => {
             if cpu.ba_low {
-                if let AddrMode::Accumulator = cpu.instruction.addr_mode { return false }
+                if let AddrMode::Accumulator = cpu.instruction.addr_mode {
+                    return false;
+                }
             }
             let v = cpu.get_operand();
             cpu.set_status_flag(cpu::StatusFlag::Carry, (v & 0x01) != 0);
@@ -738,7 +742,9 @@ pub fn run(cpu: &mut cpu::CPU) -> bool {
         }
         Op::ROL => {
             if cpu.ba_low {
-                if let AddrMode::Accumulator = cpu.instruction.addr_mode { return false }
+                if let AddrMode::Accumulator = cpu.instruction.addr_mode {
+                    return false;
+                }
             }
             let c = cpu.get_status_flag(cpu::StatusFlag::Carry);
             let v = cpu.get_operand();
@@ -752,7 +758,9 @@ pub fn run(cpu: &mut cpu::CPU) -> bool {
         }
         Op::ROR => {
             if cpu.ba_low {
-                if let AddrMode::Accumulator = cpu.instruction.addr_mode { return false }
+                if let AddrMode::Accumulator = cpu.instruction.addr_mode {
+                    return false;
+                }
             }
             let c = cpu.get_status_flag(cpu::StatusFlag::Carry);
             let v = cpu.get_operand();
@@ -1115,16 +1123,21 @@ pub fn run(cpu: &mut cpu::CPU) -> bool {
             let v = cpu.instruction.rmw_buffer;
             cpu.set_operand(v);
             cpu.sbc(v);
-        },
+        }
         Op::AXS => {
-            if cpu.ba_low { return false; }
+            if cpu.ba_low {
+                return false;
+            }
             let v = cpu.get_operand();
             let res = (cpu.a & cpu.x) as i16 - v as i16;
             cpu.x = res as u8;
             cpu.set_status_flag(cpu::StatusFlag::Carry, res >= 0);
             cpu.set_zn_flags(res as u8);
         }
-        _ => panic!("Unknown instruction: {} at ${:04X}", cpu.instruction, cpu.pc)
+        _ => panic!(
+            "Unknown instruction: {} at ${:04X}",
+            cpu.instruction, cpu.pc
+        ),
     }
 
     cpu.instruction.cycles_to_run -= 1;
