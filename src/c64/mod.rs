@@ -15,6 +15,7 @@ mod sid_tables;
 mod vic_tables;
 
 use debugger;
+use log::info;
 use minifb::*;
 use utils;
 
@@ -138,7 +139,7 @@ impl C64 {
                 let crt_file = &self.crt_to_load.to_owned()[..];
                 if !crt_file.is_empty() {
                     let crt = crt::Crt::from_filename(crt_file).unwrap();
-                    println!("{:?}", crt);
+                    info!("Loading crt {:?}", crt);
                     crt.load_into_memory(self.memory.borrow_mut());
                 }
             }
@@ -224,7 +225,7 @@ impl C64 {
     fn load_prg(&mut self, filename: &str) {
         let prg_data = utils::open_file(filename, 0);
         let start_address: u16 = ((prg_data[1] as u16) << 8) | (prg_data[0] as u16);
-        println!(
+        info!(
             "Loading {} to start location at ${:04x} ({})",
             filename, start_address, start_address
         );

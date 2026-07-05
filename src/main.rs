@@ -4,16 +4,21 @@ extern crate num;
 
 #[macro_use]
 extern crate enum_primitive;
+extern crate log;
 
 #[macro_use]
 mod utils;
 mod c64;
 mod debugger;
 
+use log::{info, LevelFilter};
 use minifb::*;
 use std::env;
 
 fn main() {
+    setup_logging();
+    info!("Rust64 starting");
+
     let args: Vec<String> = env::args().collect();
 
     let mut prg_to_load = String::new();
@@ -41,4 +46,5 @@ fn main() {
     while c64.main_window.is_open() {
         c64.run();
     }
+    info!("Rust64 ending");
 }

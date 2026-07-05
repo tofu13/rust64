@@ -2,6 +2,7 @@
 extern crate minifb;
 
 use c64::cia;
+use log::info;
 use minifb::*;
 
 /*
@@ -137,7 +138,7 @@ impl IO {
                 cia1.borrow_mut().joystick_1 = 0xFF;
             }
 
-            println!(
+            info!(
                 "Using joystick in port {}",
                 if self.joy_port1 { "1" } else { "2" }
             );

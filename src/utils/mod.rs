@@ -1,6 +1,7 @@
 // helper utility functions and macros
 use c64::cpu;
 use c64::opcodes;
+use log::{error, info};
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::SeekFrom;
@@ -23,21 +24,25 @@ macro_rules! as_mut {
 pub fn open_file(filename: &str, offset: u64) -> Vec<u8> {
     let path = Path::new(&filename);
 
-    let mut file = match File::open(path) {
-        Err(why) => panic!("Couldn't open {}: {}", path.display(), why),
-        Ok(file) => file,
+    let file = match File::open(path) {
+        Err(why) => {
+            error!("Couldn't open {}: {}", path.display(), why);
+            None
+        }
+        Ok(file) => Some(file),
     };
 
     let mut file_data = Vec::<u8>::new();
 
-    let _ = file.seek(SeekFrom::Start(offset));
-    let result = file.read_to_end(&mut file_data);
+    if let Some(mut afile) = file {
+        let _ = afile.seek(SeekFrom::Start(offset));
+        let result = afile.read_to_end(&mut file_data);
 
-    match result {
-        Err(why) => panic!("Error reading file: {}", why),
-        Ok(result) => println!("Read {}: {} bytes", path.display(), result),
-    };
-
+        match result {
+            Err(why) => error!("Error reading file: {}", why),
+            Ok(result) => info!("Read {}: {} bytes", path.display(), result),
+        };
+    }
     file_data
 }
 
