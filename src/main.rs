@@ -1,4 +1,5 @@
 extern crate byteorder;
+extern crate clap;
 extern crate minifb;
 extern crate num;
 
@@ -12,9 +13,24 @@ mod utils;
 mod c64;
 mod debugger;
 
+use clap::Parser;
 use log::{info, LevelFilter};
-use minifb::*;
-use std::env;
+use minifb::Scale;
+
+#[derive(Parser)]
+#[command(about = "rust64 - C64 emulator")]
+struct Args {
+    /// Program or cartridge file to load (.prg / .crt)
+    file: Option<String>,
+
+    /// Scale window 2x
+    #[arg(long)]
+    x2: bool,
+
+    /// Enable debugger
+    #[arg(short, long)]
+    debugger: bool,
+}
 
 #[cfg(debug_assertions)]
 fn log_output() -> fern::Output {
@@ -48,27 +64,14 @@ fn main() {
     setup_logging();
     info!("Rust64 starting");
 
-    let args: Vec<String> = env::args().collect();
+    let args = Args::parse();
 
-    let mut prg_to_load = String::new();
-    let mut crt_to_load = String::new();
-    let mut debugger_on = false;
-    let mut window_scale = Scale::X1;
+    let file = args.file.as_deref().unwrap_or("");
+    let prg_to_load = if file.ends_with(".prg") { file } else { "" };
+    let crt_to_load = if file.ends_with(".crt") { file } else { "" };
+    let window_scale = if args.x2 { Scale::X2 } else { Scale::X1 };
 
-    // process cmd line params
-    for arg in args {
-        if arg == "debugger" {
-            debugger_on = true;
-        } else if arg == "x2" {
-            window_scale = Scale::X2;
-        } else if arg.ends_with(".prg") {
-            prg_to_load = arg.clone();
-        } else if arg.ends_with(".crt") {
-            crt_to_load = arg.clone();
-        }
-    }
-
-    let mut c64 = c64::C64::new(window_scale, debugger_on, &prg_to_load, &crt_to_load);
+    let mut c64 = c64::C64::new(window_scale, args.debugger, prg_to_load, crt_to_load);
     c64.reset();
 
     // main update loop
