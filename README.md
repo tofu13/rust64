@@ -59,6 +59,7 @@ DEL     - ^
 ;       - :
 '       - ;
 \       - =
+F10     - paste text from clipboard
 F11     - start asm output to console (very slow!)
 F12     - reset C64
 RCTRL   - joystick fire button

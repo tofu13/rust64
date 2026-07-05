@@ -15,6 +15,7 @@ mod sid_tables;
 mod vic_tables;
 
 use debugger;
+use hjkl_clipboard::{Clipboard, MimeType, Selection};
 use minifb::*;
 use utils;
 
@@ -41,6 +42,8 @@ pub struct C64 {
     powered_on: bool,
     boot_complete: bool,
     cycle_count: u32,
+
+    paste_buffer: Vec<char>,
 }
 
 impl C64 {
@@ -86,6 +89,8 @@ impl C64 {
             powered_on: false,
             boot_complete: false,
             cycle_count: 0,
+
+            paste_buffer: vec![],
         };
 
         c64.main_window.set_position(75, 20);
@@ -198,6 +203,26 @@ impl C64 {
 
                 if self.io.check_restore_key(&self.main_window) {
                     self.cpu.borrow_mut().set_nmi(true);
+                }
+                // press F10 to paste buffer
+                if self.main_window.is_key_pressed(Key::F10, KeyRepeat::No) {
+                    let ctx = Clipboard::new().unwrap();
+                    self.paste_buffer = String::from_utf8_lossy(
+                        &ctx.get(Selection::Clipboard, MimeType::Text)
+                            .unwrap_or(vec![]),
+                    )
+                    .chars()
+                    .collect()
+                }
+                // Inject char from paste buffer
+                if (!self.paste_buffer.is_empty()) && self.memory.borrow_mut().read_byte(0xC6) < 11
+                {
+                    let char = self.paste_buffer.remove(0);
+                    let index = self.memory.borrow_mut().read_byte(0xC6);
+                    self.memory
+                        .borrow_mut()
+                        .write_byte(0x0277 + index as u16, utils::char_to_petscii(char));
+                    self.memory.borrow_mut().write_byte(0xC6, index + 1);
                 }
             }
 
