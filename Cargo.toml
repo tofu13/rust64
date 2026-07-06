@@ -11,6 +11,7 @@ byteorder = "1.2.2"
 enum_primitive = "0.1"
 num = "0.4"
 log = "0.4.33"
+fern = "0.7"
 
 
 [target.'cfg(not(target_os = "redox"))'.dependencies]
