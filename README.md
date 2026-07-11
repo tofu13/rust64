@@ -1,48 +1,75 @@
 [![CI](https://github.com/kondrak/rust64/actions/workflows/rust.yml/badge.svg)](https://github.com/kondrak/rust64/actions/workflows/rust.yml)
 
 # Rust64 - a C64 emulator written in Rust
-This is my attempt to study the Rust programming language and have fun at the same time. The goal is to present in the least obfuscated way how the Commodore 64 works and what's happening behind the scenes once you start a program. Emulation is cycle based and fairly accurate at this point.
 
-The emulator has a built-in visual debugger which lets you view the contents of each memory page in RAM, Color RAM, VIC registers, CIA registers and SID registers. The VIC window is a ICU64-style raster debugger where each pixel represents one VIC cycle and any events occuring at that time.
+This is my attempt to study the Rust programming language and have fun at the same time. The goal is to present in the
+least obfuscated way how the Commodore 64 works and what's happening behind the scenes once you start a program.
+Emulation is cycle based and fairly accurate at this point.
+
+The emulator has a built-in visual debugger which lets you view the contents of each memory page in RAM, Color RAM, VIC
+registers, CIA registers and SID registers. The VIC window is a ICU64-style raster debugger where each pixel represents
+one VIC cycle and any events occuring at that time.
 
 Major dependencies
 ------------------
+
 - minifb: https://crates.io/crates/minifb (works out of the box)
-- sdl2: https://crates.io/crates/sdl2 (requires extra steps, see [here](https://github.com/AngryLawyer/rust-sdl2) for instructions)
+- sdl2: https://crates.io/crates/sdl2 (requires extra steps, see [here](https://github.com/AngryLawyer/rust-sdl2) for
+  instructions)
 
 Requires Rust 1.58.0 or higher to compile and run.
 
 ### Youtube demo #1:
+
 [![Screenshot](images/rust64_youtube.png?raw=true)](https://www.youtube.com/watch?v=b6OSsTPwLaE)
+
 ### Youtube demo #2:
+
 [![Screenshot](images/rust64_youtube2.png?raw=true)](https://www.youtube.com/watch?v=g4d_1vPV6So)
+
 ### Screenshot:
+
 [![Screenshot](images/rust64_github_prev.png?raw=true)](images/rust64_github.png?raw=true)
 
 
 
 Build instructions
 ------------------
+
 ```
-cargo build
-cargo run --release
+cargo build --release
 ```
 
-You can pass a .prg file as a command line parameter to load it into memory once the emulator boots (just type RUN to start the program):
+Running rust64
+---
+
+Launch via cargo
+
 ```
-cargo run --release prgs/colors.prg
+cargo run  --release -- [OPTIONS] [FILE]
 ```
-To run with double-sized window:
+
+Or calling the executable built in `target/release/`
+
+### Command line arguments and options
+
 ```
-cargo run --release x2 prgs/colors.prg
-```
-To run with double-sized window and debug windows enabled:
-```
-cargo run --release x2 debugger prgs/colors.prg
+Usage: rust64 [OPTIONS] [FILE]
+
+Arguments:
+[FILE]  Program or cartridge file to load (.prg / .crt)
+
+Options:
+-a, --autorun   Autorun the loaded .prg file (requires <file>)
+    --x2        Scale window 2x
+-d, --debugger  Enable debugger
+-h, --help      Print help
+
 ```
 
 C64 and special key mappings
 -------------------
+
 ```
 ESC     - Run/Stop
 END     - Restore
@@ -71,6 +98,7 @@ HOME/END   - switch currently displayed memory banks between RAM, Color RAM, VIC
 
 TODO
 ------------------
+
 - serial bus/disk drives (d64, t64, tap)
 - implement remaining undocumented ops
 - switch from SDL2 to [cpal](https://github.com/tomaka/cpal) for audio once it supports OSX
@@ -78,6 +106,7 @@ TODO
 
 Known Issues
 ------------------
+
 - missing serial bus may cause some very specific programs to perform incorrectly or get stuck in infinite loops
 - elaborate programs that require very precise timing are not running correctly yet
 
@@ -104,5 +133,6 @@ The following documents and websites have been used to create this emulator:
 
 Special thanks
 ------------------
+
 - [Daniel Collin](https://twitter.com/daniel_collin) and Magnus "Pantaloon" Sjöberg for excessive test programs!
 - [Jake Taylor](https://twitter.com/ferristweetsnow) for general Rust tips!
