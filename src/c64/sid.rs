@@ -7,6 +7,7 @@ extern crate sdl2;
 use self::sdl2::audio::{AudioCallback, AudioSpecDesired};
 use c64::memory;
 use c64::sid_tables::*;
+use log::info;
 use std::cell::RefCell;
 use std::f32;
 use std::rc::Rc;
@@ -144,7 +145,7 @@ impl SID {
             mem_ref: None,
             audio_device: audio_subsystem
                 .open_playback(None, &desired_spec, |spec| {
-                    println!("{:?}", spec);
+                    info!("{:?}", spec);
                     SIDAudioDevice::new()
                 })
                 .unwrap(),

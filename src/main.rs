@@ -4,16 +4,50 @@ extern crate num;
 
 #[macro_use]
 extern crate enum_primitive;
+extern crate fern;
+extern crate log;
 
 #[macro_use]
 mod utils;
 mod c64;
 mod debugger;
 
+use log::{info, LevelFilter};
 use minifb::*;
 use std::env;
 
+#[cfg(debug_assertions)]
+fn log_output() -> fern::Output {
+    std::io::stdout().into()
+}
+
+#[cfg(not(debug_assertions))]
+fn log_output() -> fern::Output {
+    fern::log_file("rust64.log")
+        .expect("failed to open log file")
+        .into()
+}
+
+fn setup_logging() {
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "[{} {}] {}",
+                record.level(),
+                record.target(),
+                message
+            ))
+        })
+        .level(LevelFilter::Info)
+        .chain(log_output())
+        .apply()
+        .expect("failed to initialize logger");
+}
+
 fn main() {
+    setup_logging();
+    info!("Rust64 starting");
+
     let args: Vec<String> = env::args().collect();
 
     let mut prg_to_load = String::new();
@@ -41,4 +75,5 @@ fn main() {
     while c64.main_window.is_open() {
         c64.run();
     }
+    info!("Rust64 ending");
 }
