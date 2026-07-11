@@ -1,0 +1,146 @@
+name: Release
+
+on:
+  push:
+    branches: [ master ]
+    paths:
+      - "Cargo.toml"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-version:
+    name: Check version bump
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check for version bump
+        id: check
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"(.*)"/\1/')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$version" >/dev/null 2>&1; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  tag:
+    name: Tag release commit
+    needs: check-version
+    if: needs.check-version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Create and push tag
+        run: |
+          version="${{ needs.check-version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$version" -m "Release v$version"
+          git push origin "v$version"
+
+  build:
+    name: Build (${{ matrix.os }})
+    needs: [check-version, tag]
+    if: needs.check-version.outputs.changed == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset_name: rust64-linux-x86_64.tar.gz
+          - os: windows-latest
+            asset_name: rust64-windows-x86_64.zip
+          - os: macos-latest
+            asset_name: rust64-macos-x86_64.tar.gz
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install SDL2 (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libegl1-mesa-dev libgles2-mesa-dev libsdl2-dev
+
+      - name: Install SDL2 (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew trust aws/tap
+          brew install sdl2
+          echo "LIBRARY_PATH=$(brew --prefix sdl2)/lib" >> $GITHUB_ENV
+
+      - name: Install SDL2 (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        env:
+          SDL2_VERSION: "2.32.10"
+        run: |
+          Invoke-WebRequest -Uri "https://www.libsdl.org/release/SDL2-devel-$env:SDL2_VERSION-VC.zip" -OutFile "SDL2-devel-$env:SDL2_VERSION-VC.zip"
+          7z x "SDL2-devel-$env:SDL2_VERSION-VC.zip"
+          $sdl2Dir = "$(Get-Location)\SDL2-$env:SDL2_VERSION\lib\x64"
+          echo "LIB=$sdl2Dir;$env:LIB" >> $env:GITHUB_ENV
+          echo "PATH=$sdl2Dir;$env:PATH" >> $env:GITHUB_ENV
+          Copy-Item "$sdl2Dir\SDL2.dll" .
+
+      - name: Build (release)
+        run: cargo build --release --verbose
+
+      - name: Package (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          staging="rust64"
+          mkdir -p "$staging"
+          cp target/release/rust64 "$staging/"
+          cp -r rom res "$staging/"
+          cp README.md LICENSE "$staging/"
+          tar -czf "${{ matrix.asset_name }}" "$staging"
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $staging = "rust64"
+          New-Item -ItemType Directory -Path $staging | Out-Null
+          Copy-Item target/release/rust64.exe $staging/
+          Copy-Item SDL2.dll $staging/
+          Copy-Item rom, res -Destination $staging -Recurse
+          Copy-Item README.md, LICENSE $staging/
+          Compress-Archive -Path $staging -DestinationPath "${{ matrix.asset_name }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+
+  release:
+    name: Publish release
+    needs: [check-version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.check-version.outputs.version }}
+          files: artifacts/*
+          generate_release_notes: true
