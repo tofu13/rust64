@@ -172,3 +172,99 @@ enum_from_primitive! {
         Flash,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static TEMP_FILE_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    // builds the bytes of a minimal, single-chip .crt file matching the
+    // layout that Crt::from_filename expects
+    fn build_crt_bytes(exrom: u8, game: u8, hw_type: u16, load_addr: u16, data: &[u8]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"C64 CARTRIDGE   "); // 16-byte signature
+        bytes.extend_from_slice(&64u32.to_be_bytes()); // header_len
+        bytes.extend_from_slice(&[0x01, 0x00]); // version
+        bytes.extend_from_slice(&hw_type.to_be_bytes());
+        bytes.push(exrom);
+        bytes.push(game);
+        bytes.resize(0x20, 0); // pad up to the name field offset
+        bytes.extend_from_slice(&[0u8; 32]); // name
+        assert_eq!(bytes.len(), 0x40); // matches header_len above
+
+        bytes.extend_from_slice(b"CHIP");
+        let chip_len = (16 + data.len()) as u32; // chip sub-header + data
+        bytes.extend_from_slice(&chip_len.to_be_bytes());
+        bytes.extend_from_slice(&0u16.to_be_bytes()); // chip_type = ROM
+        bytes.extend_from_slice(&0u16.to_be_bytes()); // bank_number
+        bytes.extend_from_slice(&load_addr.to_be_bytes());
+        bytes.extend_from_slice(&(data.len() as u16).to_be_bytes());
+        bytes.extend_from_slice(data);
+
+        bytes
+    }
+
+    fn write_temp_crt(bytes: &[u8]) -> std::path::PathBuf {
+        let n = TEMP_FILE_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let path =
+            std::env::temp_dir().join(format!("rust64_test_crt_{}_{}.crt", std::process::id(), n));
+        let mut f = File::create(&path).unwrap();
+        f.write_all(bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn from_filename_reads_header_and_loads_chip_data_into_memory() {
+        let data = vec![0xA9, 0x01, 0x60];
+        let bytes = build_crt_bytes(1, 0, 0, 0x8000, &data);
+        let path = write_temp_crt(&bytes);
+
+        let crt = Crt::from_filename(path.to_str().unwrap()).unwrap();
+
+        let mem_shared = memory::Memory::new_shared();
+        crt.load_into_memory(mem_shared.borrow_mut());
+
+        let mut mem = mem_shared.borrow_mut();
+        assert!(mem.exrom); // header exrom byte was 1
+        assert!(!mem.game); // header game byte was 0
+        assert_eq!(mem.read_byte(0x8000), 0xA9);
+        assert_eq!(mem.read_byte(0x8001), 0x01);
+        assert_eq!(mem.read_byte(0x8002), 0x60);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn from_filename_rejects_invalid_signature() {
+        let mut bytes = build_crt_bytes(0, 0, 0, 0x8000, &[0x00]);
+        bytes[0] = b'X'; // corrupt the signature
+        let path = write_temp_crt(&bytes);
+
+        let result = Crt::from_filename(path.to_str().unwrap());
+
+        assert_eq!(result.unwrap_err(), "Invalid cartridge signature");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn from_filename_rejects_unsupported_hardware_type() {
+        let bytes = build_crt_bytes(0, 0, 1, 0x8000, &[0x00]); // hw_type = 1
+        let path = write_temp_crt(&bytes);
+
+        let result = Crt::from_filename(path.to_str().unwrap());
+
+        assert_eq!(result.unwrap_err(), "Unsupported cartridge type");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn from_filename_returns_error_for_missing_file() {
+        let result = Crt::from_filename("/nonexistent/path/does_not_exist.crt");
+        assert!(result.is_err());
+    }
+}
