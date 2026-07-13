@@ -262,3 +262,104 @@ impl Memory {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ram_bank_write_read_roundtrip() {
+        let mut bank = MemBank::new(MemType::Ram);
+        bank.write(0x1234, 0xAB);
+        assert_eq!(bank.read(0x1234), 0xAB);
+    }
+
+    #[test]
+    #[should_panic(expected = "Can't write to ROM!")]
+    fn writing_to_rom_bank_panics() {
+        let mut bank = MemBank::new(MemType::Basic);
+        bank.write(0xA000, 0x00);
+    }
+
+    #[test]
+    fn io_bank_ors_fixed_bits_into_vic_control_registers() {
+        let mut bank = MemBank::new(MemType::Io);
+        bank.write(0xD016, 0x0A);
+        assert_eq!(bank.read(0xD016), 0xC0 | 0x0A);
+        bank.write(0xD019, 0x05);
+        assert_eq!(bank.read(0xD019), 0x70 | 0x05);
+        bank.write(0xD01A, 0x03);
+        assert_eq!(bank.read(0xD01A), 0xF0 | 0x03);
+        bank.write(0xD020, 0x05);
+        assert_eq!(bank.read(0xD020), 0xF0 | 0x05);
+    }
+
+    #[test]
+    fn io_bank_d018_always_has_low_bit_set_on_read() {
+        let mut bank = MemBank::new(MemType::Io);
+        bank.write(0xD018, 0x02);
+        assert_eq!(bank.read(0xD018), 0x01 | 0x02);
+    }
+
+    #[test]
+    fn io_bank_writes_are_ignored_and_reads_are_ff_in_unused_range() {
+        let mut bank = MemBank::new(MemType::Io);
+        bank.write(0xD02F, 0x42);
+        assert_eq!(bank.read(0xD02F), 0xFF);
+    }
+
+    #[test]
+    fn io_bank_clears_collision_registers_on_read() {
+        let mut bank = MemBank::new(MemType::Io);
+        bank.write(0xD01E, 0x55);
+        assert_eq!(bank.read(0xD01E), 0x55);
+        assert_eq!(bank.read(0xD01E), 0x00);
+    }
+
+    #[test]
+    fn io_bank_mirrors_d040_range_onto_d000_d03f() {
+        let mut bank = MemBank::new(MemType::Io);
+        bank.write(0xD040, 0x99);
+        assert_eq!(bank.read(0xD000), 0x99);
+    }
+
+    #[test]
+    fn write_byte_to_ram_returns_true() {
+        let mem_shared = Memory::new_shared();
+        let mut mem = mem_shared.borrow_mut();
+        assert!(mem.write_byte(0x1000, 0x42));
+        assert_eq!(mem.read_byte(0x1000), 0x42);
+    }
+
+    #[test]
+    fn write_byte_to_rom_writes_ram_underneath_and_returns_false() {
+        let mem_shared = Memory::new_shared();
+        let mut mem = mem_shared.borrow_mut();
+        mem.basic_on = true;
+        assert!(!mem.write_byte(0xA000, 0x42));
+        mem.basic_on = false; // reveal the RAM underneath the (unwritten) ROM
+        assert_eq!(mem.read_byte(0xA000), 0x42);
+    }
+
+    #[test]
+    fn read_word_le_reads_bytes_in_little_endian_order() {
+        let mem_shared = Memory::new_shared();
+        let mut mem = mem_shared.borrow_mut();
+        mem.write_byte(0x1000, 0x34);
+        mem.write_byte(0x1001, 0x12);
+        assert_eq!(mem.read_word_le(0x1000), 0x1234);
+    }
+
+    #[test]
+    fn reset_enables_kernal_chargen_and_basic_roms() {
+        let mem_shared = Memory::new_shared();
+        let mut mem = mem_shared.borrow_mut();
+        mem.reset();
+
+        assert_eq!(mem.read_byte(0x0001), 0x07);
+        assert!(mem.basic_on);
+        assert!(mem.kernal_on);
+        assert!(mem.io_on);
+        assert!(!mem.chargen_on);
+    }
+}

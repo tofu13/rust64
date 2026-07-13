@@ -613,3 +613,244 @@ impl CPU {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // CPU with real RAM attached but no VIC/CIA/SID - enough for anything that
+    // doesn't touch memory-mapped I/O (io_on defaults to false anyway)
+    fn new_cpu_with_ram() -> CPUShared {
+        let cpu = CPU::new_shared();
+        cpu.borrow_mut().mem_ref = Some(memory::Memory::new_shared());
+        cpu
+    }
+
+    #[test]
+    fn set_and_get_status_flag_roundtrip() {
+        let cpu_shared = CPU::new_shared();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.set_status_flag(StatusFlag::Carry, true);
+        assert!(cpu.get_status_flag(StatusFlag::Carry));
+        assert!(!cpu.get_status_flag(StatusFlag::Negative));
+
+        cpu.set_status_flag(StatusFlag::Carry, false);
+        assert!(!cpu.get_status_flag(StatusFlag::Carry));
+    }
+
+    #[test]
+    fn set_zn_flags_reflects_zero_and_negative() {
+        let cpu_shared = CPU::new_shared();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.set_zn_flags(0x00);
+        assert!(cpu.get_status_flag(StatusFlag::Zero));
+        assert!(!cpu.get_status_flag(StatusFlag::Negative));
+
+        cpu.set_zn_flags(0x80);
+        assert!(!cpu.get_status_flag(StatusFlag::Zero));
+        assert!(cpu.get_status_flag(StatusFlag::Negative));
+
+        cpu.set_zn_flags(0x01);
+        assert!(!cpu.get_status_flag(StatusFlag::Zero));
+        assert!(!cpu.get_status_flag(StatusFlag::Negative));
+    }
+
+    #[test]
+    fn adc_binary_carry_out_wraps_and_sets_carry() {
+        let cpu_shared = CPU::new_shared();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.a = 0xFF;
+        cpu.adc(0x01);
+
+        assert_eq!(cpu.a, 0x00);
+        assert!(cpu.get_status_flag(StatusFlag::Carry));
+        assert!(cpu.get_status_flag(StatusFlag::Zero));
+        assert!(!cpu.get_status_flag(StatusFlag::Overflow));
+    }
+
+    #[test]
+    fn adc_binary_signed_overflow() {
+        let cpu_shared = CPU::new_shared();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.a = 0x50; // +80
+        cpu.adc(0x50); // +80 -> 160, overflows into negative as i8
+
+        assert_eq!(cpu.a, 0xA0);
+        assert!(cpu.get_status_flag(StatusFlag::Overflow));
+        assert!(cpu.get_status_flag(StatusFlag::Negative));
+        assert!(!cpu.get_status_flag(StatusFlag::Carry));
+    }
+
+    #[test]
+    fn adc_decimal_mode_performs_bcd_correction() {
+        let cpu_shared = CPU::new_shared();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.set_status_flag(StatusFlag::DecimalMode, true);
+        cpu.a = 0x09; // BCD 9
+        cpu.adc(0x01); // + BCD 1 -> BCD 10
+
+        assert_eq!(cpu.a, 0x10);
+        assert!(!cpu.get_status_flag(StatusFlag::Carry));
+    }
+
+    #[test]
+    fn sbc_binary_no_borrow() {
+        let cpu_shared = CPU::new_shared();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.set_status_flag(StatusFlag::Carry, true); // carry set = no incoming borrow
+        cpu.a = 0x50;
+        cpu.sbc(0x30);
+
+        assert_eq!(cpu.a, 0x20);
+        assert!(cpu.get_status_flag(StatusFlag::Carry)); // still no borrow
+    }
+
+    #[test]
+    fn sbc_binary_with_borrow_clears_carry() {
+        let cpu_shared = CPU::new_shared();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.set_status_flag(StatusFlag::Carry, true);
+        cpu.a = 0x10;
+        cpu.sbc(0x20); // underflows -> borrow occurs
+
+        assert_eq!(cpu.a, 0xF0);
+        assert!(!cpu.get_status_flag(StatusFlag::Carry)); // carry clear = borrow
+    }
+
+    #[test]
+    fn sbc_decimal_mode_performs_bcd_correction() {
+        let cpu_shared = CPU::new_shared();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.set_status_flag(StatusFlag::DecimalMode, true);
+        cpu.set_status_flag(StatusFlag::Carry, true); // no incoming borrow
+        cpu.a = 0x10; // BCD 10
+        cpu.sbc(0x01); // - BCD 1 -> BCD 9
+
+        assert_eq!(cpu.a, 0x09);
+        assert!(cpu.get_status_flag(StatusFlag::Carry));
+    }
+
+    #[test]
+    fn branch_not_taken_shortens_instruction() {
+        let cpu_shared = CPU::new_shared();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        assert!(cpu.branch(false, 3));
+        assert_eq!(cpu.instruction.cycles_to_run, 1);
+    }
+
+    #[test]
+    fn branch_taken_detects_page_crossing() {
+        let cpu_shared = CPU::new_shared();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.pc = 0x1000;
+        cpu.instruction.operand_addr = 0x1005; // same page
+        assert!(cpu.branch(true, 3));
+        assert!(!cpu.instruction.zp_crossed);
+
+        cpu.pc = 0x10F0;
+        cpu.instruction.operand_addr = 0x1105; // crosses into next page
+        assert!(cpu.branch(true, 3));
+        assert!(cpu.instruction.zp_crossed);
+    }
+
+    #[test]
+    fn branch_cycle_two_updates_pc_and_irq_timers_when_no_page_cross() {
+        let cpu_shared = CPU::new_shared();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.instruction.zp_crossed = false;
+        cpu.instruction.operand_addr = 0x2000;
+        cpu.first_irq_cycle = 5;
+        cpu.first_nmi_cycle = 7;
+
+        assert!(cpu.branch(true, 2));
+
+        assert_eq!(cpu.pc, 0x2000);
+        assert_eq!(cpu.first_irq_cycle, 6);
+        assert_eq!(cpu.first_nmi_cycle, 8);
+        assert_eq!(cpu.instruction.cycles_to_run, 1);
+    }
+
+    #[test]
+    fn branch_cycle_two_stalls_on_ba_low_before_updating_pc() {
+        let cpu_shared = CPU::new_shared();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.pc = 0x1234;
+        cpu.ba_low = true;
+        cpu.instruction.zp_crossed = false;
+        cpu.instruction.operand_addr = 0x2000;
+        cpu.first_irq_cycle = 5;
+
+        assert!(!cpu.branch(true, 2));
+
+        // irq timer bump happens unconditionally, but pc update does not
+        assert_eq!(cpu.first_irq_cycle, 6);
+        assert_eq!(cpu.pc, 0x1234);
+    }
+
+    #[test]
+    fn write_and_read_byte_roundtrip() {
+        let cpu_shared = new_cpu_with_ram();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        assert!(cpu.write_byte(0x1000, 0x42));
+        assert_eq!(cpu.read_byte(0x1000), 0x42);
+    }
+
+    #[test]
+    fn next_byte_reads_and_advances_pc() {
+        let cpu_shared = new_cpu_with_ram();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.pc = 0x2000;
+        cpu.write_byte(0x2000, 0xEA);
+
+        assert_eq!(cpu.next_byte(), 0xEA);
+        assert_eq!(cpu.pc, 0x2001);
+    }
+
+    #[test]
+    fn push_and_pop_byte_roundtrip() {
+        let cpu_shared = new_cpu_with_ram();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        let sp_before = cpu.sp;
+        cpu.push_byte(0x55);
+        assert_eq!(cpu.sp, sp_before.wrapping_sub(1));
+        assert_eq!(cpu.pop_byte(), 0x55);
+        assert_eq!(cpu.sp, sp_before);
+    }
+
+    #[test]
+    fn push_word_stores_bytes_low_then_high_on_stack() {
+        let cpu_shared = new_cpu_with_ram();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.push_word(0x1234);
+        assert_eq!(cpu.pop_byte(), 0x34); // low byte was pushed last
+        assert_eq!(cpu.pop_byte(), 0x12);
+    }
+
+    #[test]
+    fn reset_loads_pc_from_reset_vector() {
+        let cpu_shared = new_cpu_with_ram();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.write_byte(RESET_VECTOR, 0x00);
+        cpu.write_byte(RESET_VECTOR + 1, 0x80);
+        cpu.reset();
+
+        assert_eq!(cpu.pc, 0x8000);
+    }
+}

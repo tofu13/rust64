@@ -1648,3 +1648,206 @@ impl VIC {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // VIC with real Memory/CPU attached - neither needs a display, and it's
+    // enough for register I/O that mirrors into shared memory or pokes the
+    // CPU. The full cycle-accurate update() loop is not exercised here.
+    fn new_wired_vic() -> (VICShared, cpu::CPUShared) {
+        let vic = VIC::new_shared();
+        let mem = memory::Memory::new_shared();
+        let cpu_shared = cpu::CPU::new_shared();
+        vic.borrow_mut().set_references(mem, cpu_shared.clone());
+        (vic, cpu_shared)
+    }
+
+    #[test]
+    fn raster_irq_unmasked_sets_flag_without_triggering() {
+        let vic_shared = VIC::new_shared();
+        let mut vic = vic_shared.borrow_mut();
+
+        let cb = vic.raster_irq();
+
+        assert!(matches!(cb, cpu::Callback::None));
+        assert_eq!(vic.irq_flag, 0x01);
+    }
+
+    #[test]
+    fn raster_irq_masked_triggers_vic_irq() {
+        let vic_shared = VIC::new_shared();
+        let mut vic = vic_shared.borrow_mut();
+        vic.irq_mask = 0x01;
+
+        let cb = vic.raster_irq();
+
+        assert!(matches!(cb, cpu::Callback::TriggerVICIrq));
+        assert_eq!(vic.irq_flag, 0x81);
+    }
+
+    #[test]
+    fn read_register_raster_counter_returns_low_byte() {
+        let vic_shared = VIC::new_shared();
+        let mut vic = vic_shared.borrow_mut();
+        vic.raster_cnt = 0x1FF; // exceeds a byte, only the low byte is reported
+
+        assert_eq!(vic.read_register(0xD012), 0xFF);
+    }
+
+    #[test]
+    fn read_register_irq_flag_reports_pending_bits_with_reserved_bits_set() {
+        let vic_shared = VIC::new_shared();
+        let mut vic = vic_shared.borrow_mut();
+        vic.irq_flag = 0x01;
+
+        assert_eq!(vic.read_register(0xD019), 0x71); // 0x01 | 0x70
+    }
+
+    #[test]
+    fn read_register_irq_mask_reports_mask_with_reserved_bits_set() {
+        let vic_shared = VIC::new_shared();
+        let mut vic = vic_shared.borrow_mut();
+        vic.irq_mask = 0x01;
+
+        assert_eq!(vic.read_register(0xD01A), 0xF1); // 0x01 | 0xF0
+    }
+
+    #[test]
+    fn write_and_read_sprite0_position_registers_roundtrip() {
+        let (vic_shared, _cpu) = new_wired_vic();
+        let mut vic = vic_shared.borrow_mut();
+        let mut cb = cpu::Callback::None;
+
+        vic.write_register(0xD000, 0x42, &mut cb); // sprite 0 X (low byte)
+        vic.write_register(0xD001, 0x24, &mut cb); // sprite 0 Y
+
+        assert_eq!(vic.read_register(0xD000), 0x42);
+        assert_eq!(vic.read_register(0xD001), 0x24);
+    }
+
+    #[test]
+    fn write_register_msb_sets_sprite_x_high_bit() {
+        let (vic_shared, _cpu) = new_wired_vic();
+        let mut vic = vic_shared.borrow_mut();
+        let mut cb = cpu::Callback::None;
+
+        vic.write_register(0xD000, 0xFF, &mut cb); // sprite 0 X low byte
+        vic.write_register(0xD010, 0x01, &mut cb); // bit 0 -> sprite 0 gets the MSB
+
+        assert_eq!(vic.mx[0], 0x1FF);
+        assert_eq!(vic.read_register(0xD000), 0xFF); // low byte only, truncated to u8
+    }
+
+    #[test]
+    fn write_register_memory_pointers_sets_matrix_char_and_bitmap_base() {
+        let (vic_shared, _cpu) = new_wired_vic();
+        let mut vic = vic_shared.borrow_mut();
+        let mut cb = cpu::Callback::None;
+
+        vic.write_register(0xD018, 0x1E, &mut cb);
+
+        assert_eq!(vic.matrix_base, 0x0400);
+        assert_eq!(vic.char_base, 0x3800);
+        assert_eq!(vic.bitmap_base, 0x2000);
+    }
+
+    #[test]
+    fn write_register_irq_ack_clears_flags_and_emits_clear_callback_when_fully_cleared() {
+        let (vic_shared, _cpu) = new_wired_vic();
+        let mut vic = vic_shared.borrow_mut();
+        vic.irq_flag = 0x01;
+        let mut cb = cpu::Callback::None;
+
+        vic.write_register(0xD019, 0x01, &mut cb);
+
+        assert_eq!(vic.irq_flag, 0x00);
+        assert!(matches!(cb, cpu::Callback::ClearVICIrq));
+    }
+
+    #[test]
+    fn write_register_irq_ack_keeps_flag_set_when_still_masked() {
+        let (vic_shared, _cpu) = new_wired_vic();
+        let mut vic = vic_shared.borrow_mut();
+        vic.irq_flag = 0x03;
+        vic.irq_mask = 0x02;
+        let mut cb = cpu::Callback::None;
+
+        vic.write_register(0xD019, 0x01, &mut cb); // only acknowledge bit 0
+
+        assert_eq!(vic.irq_flag, 0x82);
+        assert!(matches!(cb, cpu::Callback::None));
+    }
+
+    #[test]
+    fn write_register_irq_mask_triggers_callback_when_pending_flag_becomes_masked() {
+        let (vic_shared, _cpu) = new_wired_vic();
+        let mut vic = vic_shared.borrow_mut();
+        vic.irq_flag = 0x01;
+        let mut cb = cpu::Callback::None;
+
+        vic.write_register(0xD01A, 0x01, &mut cb);
+
+        assert_eq!(vic.irq_mask, 0x01);
+        assert_eq!(vic.irq_flag, 0x81);
+        assert!(matches!(cb, cpu::Callback::TriggerVICIrq));
+    }
+
+    #[test]
+    fn write_register_irq_mask_clears_callback_when_mask_disabled() {
+        let (vic_shared, _cpu) = new_wired_vic();
+        let mut vic = vic_shared.borrow_mut();
+        vic.irq_flag = 0x81;
+        let mut cb = cpu::Callback::None;
+
+        vic.write_register(0xD01A, 0x00, &mut cb);
+
+        assert_eq!(vic.irq_mask, 0x00);
+        assert_eq!(vic.irq_flag, 0x01);
+        assert!(matches!(cb, cpu::Callback::ClearVICIrq));
+    }
+
+    #[test]
+    fn trigger_lp_irq_fires_once_per_frame_when_masked() {
+        let (vic_shared, cpu_shared) = new_wired_vic();
+        vic_shared.borrow_mut().irq_mask = 0x08;
+
+        vic_shared.borrow_mut().trigger_lp_irq();
+        assert!(cpu_shared.borrow().vic_irq);
+        assert_eq!(vic_shared.borrow().irq_flag, 0x88);
+
+        // reset the observable CPU flag and fire again within the same frame -
+        // trigger_lp_irq must be a no-op until lp_triggered resets on VBlank
+        cpu_shared.borrow_mut().vic_irq = false;
+        vic_shared.borrow_mut().trigger_lp_irq();
+        assert!(!cpu_shared.borrow().vic_irq);
+    }
+
+    #[test]
+    fn on_va_change_updates_cia_vabase() {
+        let (vic_shared, _cpu) = new_wired_vic();
+        let mut vic = vic_shared.borrow_mut();
+
+        vic.on_va_change(0b10);
+
+        assert_eq!(vic.cia_vabase, 0b10 << 14);
+    }
+
+    #[test]
+    fn read_byte_reads_from_ram_when_not_in_chargen_range() {
+        let (vic_shared, _cpu) = new_wired_vic();
+        let mut vic = vic_shared.borrow_mut();
+
+        // address 0x0000 with cia_vabase 0 doesn't fall into the $1000-$1FFF
+        // chargen window, so this exercises the plain RAM read path
+        let mem_ref = vic.mem_ref.clone().unwrap();
+        mem_ref
+            .borrow_mut()
+            .get_ram_bank(memory::MemType::Ram)
+            .write(0x0000, 0x42);
+
+        assert_eq!(vic.read_byte(0x0000), 0x42);
+        assert_eq!(vic.last_byte, 0x42);
+    }
+}

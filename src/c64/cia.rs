@@ -763,3 +763,250 @@ impl CIA {
         self.prev_lp = (self.prb | !self.ddrb) & 0x10;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // CIA with real Memory/CPU/VIC attached - none of them need a display or
+    // audio device, so this is enough for register writes that mirror into
+    // shared memory or poke the VIC/CPU.
+    fn new_wired_cia(is_cia1: bool) -> (CIAShared, cpu::CPUShared) {
+        let cia = CIA::new_shared(is_cia1);
+        let mem = memory::Memory::new_shared();
+        let cpu_shared = cpu::CPU::new_shared();
+        let vic_shared = vic::VIC::new_shared();
+        cia.borrow_mut()
+            .set_references(mem, cpu_shared.clone(), vic_shared);
+        (cia, cpu_shared)
+    }
+
+    #[test]
+    fn timer_new_sets_default_value_and_latch() {
+        let timer = CIATimer::new(true);
+        assert_eq!(timer.value, 0xFFFF);
+        assert_eq!(timer.latch, 1);
+        assert!(timer.is_ta);
+    }
+
+    #[test]
+    fn timer_reset_restores_defaults_after_mutation() {
+        let mut timer = CIATimer::new(true);
+        timer.value = 10;
+        timer.latch = 20;
+        timer.ctrl = 0xFF;
+        timer.has_new_ctrl = true;
+        timer.underflow = true;
+
+        timer.reset();
+
+        assert_eq!(timer.value, 0xFFFF);
+        assert_eq!(timer.latch, 1);
+        assert_eq!(timer.ctrl, 0);
+        assert!(!timer.has_new_ctrl);
+        assert!(!timer.underflow);
+    }
+
+    #[test]
+    fn timer_count_decrements_without_underflow_mid_range() {
+        let mut timer = CIATimer::new(true);
+        timer.state = TimerState::Count;
+        timer.is_cnt_phi2 = true;
+        timer.value = 5;
+        let mut icr = 0u8;
+
+        timer.count(&mut icr, false);
+
+        assert_eq!(timer.value, 4);
+        assert!(!timer.underflow);
+        assert_eq!(icr, 0);
+    }
+
+    #[test]
+    fn timer_count_underflow_sets_icr_bit0_for_timer_a() {
+        let mut timer = CIATimer::new(true);
+        timer.state = TimerState::Count;
+        timer.is_cnt_phi2 = true;
+        timer.value = 1;
+        let mut icr = 0u8;
+
+        timer.count(&mut icr, false);
+
+        assert_eq!(icr, 0x01);
+        assert!(timer.underflow);
+        assert!(timer.irq_next_cycle);
+        assert_eq!(timer.value, timer.latch);
+    }
+
+    #[test]
+    fn timer_count_underflow_sets_icr_bit1_for_timer_b() {
+        let mut timer = CIATimer::new(false);
+        timer.state = TimerState::Count;
+        timer.is_cnt_phi2 = true;
+        timer.value = 1;
+        let mut icr = 0u8;
+
+        timer.count(&mut icr, false);
+
+        assert_eq!(icr, 0x02);
+    }
+
+    #[test]
+    fn timer_idle_starts_timer_from_stop_when_start_bit_set() {
+        let mut timer = CIATimer::new(true);
+        timer.state = TimerState::Stop;
+        timer.has_new_ctrl = true;
+        timer.new_ctrl = 0x01; // start bit set, load bit clear
+
+        timer.idle();
+
+        assert!(matches!(timer.state, TimerState::WaitCount));
+        assert_eq!(timer.ctrl, 0x01);
+        assert!(!timer.has_new_ctrl);
+    }
+
+    #[test]
+    fn trigger_irq_sets_icr_and_reports_masked_status() {
+        let cia_shared = CIA::new_shared(true);
+        let mut cia = cia_shared.borrow_mut();
+
+        assert!(!cia.trigger_irq(0x01)); // not masked yet
+        assert_eq!(cia.icr, 0x01);
+
+        cia.irq_mask = 0x01;
+        assert!(cia.trigger_irq(0x01)); // now masked -> irq triggered
+        assert_eq!(cia.icr, 0x81);
+    }
+
+    #[test]
+    fn reset_restores_defaults_after_mutation() {
+        let cia_shared = CIA::new_shared(true);
+        let mut cia = cia_shared.borrow_mut();
+
+        cia.icr = 0xFF;
+        cia.pra = 0xFF;
+        cia.key_matrix[0] = 0x00;
+        cia.joystick_1 = 0x00;
+
+        cia.reset();
+
+        assert_eq!(cia.icr, 0);
+        assert_eq!(cia.pra, 0);
+        assert_eq!(cia.key_matrix[0], 0xFF);
+        assert_eq!(cia.joystick_1, 0xFF);
+    }
+
+    #[test]
+    fn write_register_timer_a_latch_and_value_roundtrip() {
+        let (cia_shared, _cpu) = new_wired_cia(true);
+        let mut cia = cia_shared.borrow_mut();
+        let mut cb = cpu::Callback::None;
+
+        cia.write_register(0xDC04, 0x34, &mut cb);
+        cia.write_register(0xDC05, 0x12, &mut cb);
+
+        assert_eq!(cia.read_register(0xDC04, &mut cb), 0x34);
+        assert_eq!(cia.read_register(0xDC05, &mut cb), 0x12);
+    }
+
+    #[test]
+    fn write_and_read_ddra_register() {
+        let (cia_shared, _cpu) = new_wired_cia(true);
+        let mut cia = cia_shared.borrow_mut();
+        let mut cb = cpu::Callback::None;
+
+        cia.write_register(0xDC02, 0xAA, &mut cb);
+
+        assert_eq!(cia.read_register(0xDC02, &mut cb), 0xAA);
+    }
+
+    #[test]
+    fn read_register_icr_clears_pending_flags_and_emits_clear_cia_irq_callback() {
+        let cia_shared = CIA::new_shared(true);
+        let mut cia = cia_shared.borrow_mut();
+        cia.icr = 0x81;
+        let mut cb = cpu::Callback::None;
+
+        let value = cia.read_register(0xDC0D, &mut cb);
+
+        assert_eq!(value, 0x81);
+        assert_eq!(cia.icr, 0);
+        assert!(matches!(cb, cpu::Callback::ClearCIAIrq));
+    }
+
+    #[test]
+    fn read_register_icr_emits_clear_nmi_callback_for_cia2() {
+        let cia_shared = CIA::new_shared(false);
+        let mut cia = cia_shared.borrow_mut();
+        cia.icr = 0x80;
+        let mut cb = cpu::Callback::None;
+
+        cia.read_register(0xDD0D, &mut cb);
+
+        assert!(matches!(cb, cpu::Callback::ClearNMI));
+    }
+
+    #[test]
+    fn read_cia1_prb_register_reflects_key_matrix_when_columns_selected() {
+        let cia_shared = CIA::new_shared(true);
+        let mut cia = cia_shared.borrow_mut();
+        cia.ddra = 0xFF; // PA all outputs
+        cia.pra = 0x00; // drive all columns low -> select all rows
+        cia.key_matrix[3] = 0xFE; // one key pressed in row 3
+        let mut cb = cpu::Callback::None;
+
+        assert_eq!(cia.read_register(0xDC01, &mut cb), 0xFE);
+    }
+
+    #[test]
+    fn process_irq_triggers_cia_irq_when_timer_a_is_masked() {
+        let (cia_shared, cpu_shared) = new_wired_cia(true);
+        {
+            let mut cia = cia_shared.borrow_mut();
+            cia.irq_mask = 0x01;
+            cia.timer_a.irq_next_cycle = true;
+        }
+
+        cia_shared.borrow_mut().process_irq();
+
+        assert!(cpu_shared.borrow().cia_irq);
+    }
+
+    #[test]
+    fn process_irq_triggers_nmi_when_timer_a_is_masked() {
+        let (cia_shared, cpu_shared) = new_wired_cia(false);
+        {
+            let mut cia = cia_shared.borrow_mut();
+            cia.irq_mask = 0x01;
+            cia.timer_a.irq_next_cycle = true;
+        }
+
+        cia_shared.borrow_mut().process_irq();
+
+        assert!(cpu_shared.borrow().nmi);
+    }
+
+    #[test]
+    fn count_tod_increments_deciseconds() {
+        let (cia_shared, _cpu) = new_wired_cia(true);
+        let mut cia = cia_shared.borrow_mut();
+
+        cia.count_tod();
+
+        assert_eq!(cia.tod_dsec, 1);
+        assert_eq!(cia.tod_freq_div, 5);
+    }
+
+    #[test]
+    fn count_tod_rolls_deciseconds_into_seconds() {
+        let (cia_shared, _cpu) = new_wired_cia(true);
+        let mut cia = cia_shared.borrow_mut();
+        cia.tod_dsec = 9;
+        cia.tod_freq_div = 0;
+
+        cia.count_tod();
+
+        assert_eq!(cia.tod_dsec, 0);
+        assert_eq!(cia.tod_sec, 0x01);
+    }
+}

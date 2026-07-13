@@ -768,3 +768,185 @@ impl AudioCallback for SIDAudioDevice {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // SIDAudioDevice holds all the actual SID calculations and has no SDL
+    // dependency itself (only the AudioCallback impl and the outer SID
+    // wrapper need a real audio device), so it can be tested directly
+    // without touching SDL at all.
+
+    #[test]
+    fn new_wires_up_ring_modulation_routing() {
+        let device = SIDAudioDevice::new();
+        assert_eq!(device.voices[0].modulator, 2);
+        assert_eq!(device.voices[0].modulatee, 1);
+        assert_eq!(device.voices[1].modulator, 0);
+        assert_eq!(device.voices[1].modulatee, 2);
+        assert_eq!(device.voices[2].modulator, 1);
+        assert_eq!(device.voices[2].modulatee, 0);
+    }
+
+    #[test]
+    fn reset_restores_defaults_after_mutation() {
+        let mut device = SIDAudioDevice::new();
+        device.volume = 0x0F;
+        device.filter_type = FilterType::Lowpass;
+        device.filter_freq = 0x80;
+        device.sample_idx = 5;
+        device.voices[0].gate = true;
+        device.voices[0].level = 12345;
+
+        device.reset();
+
+        assert_eq!(device.volume, 0);
+        assert!(matches!(device.filter_type, FilterType::None));
+        assert_eq!(device.filter_freq, 0);
+        assert_eq!(device.sample_idx, 0);
+        assert!(!device.voices[0].gate);
+        assert_eq!(device.voices[0].level, 0);
+    }
+
+    #[test]
+    fn write_register_sets_voice_frequency_and_wf_add() {
+        let mut device = SIDAudioDevice::new();
+
+        device.write_register(0xD400, 0x34); // voice 0 freq low byte
+        device.write_register(0xD401, 0x12); // voice 0 freq high byte
+
+        assert_eq!(device.voices[0].freq, 0x1234);
+        assert_eq!(device.voices[0].wf_add, SID_CYCLES * 0x1234);
+    }
+
+    #[test]
+    fn write_register_sets_pulse_width() {
+        let mut device = SIDAudioDevice::new();
+
+        device.write_register(0xD402, 0x56); // low byte
+        device.write_register(0xD403, 0xFA); // high nibble (only low 4 bits used)
+
+        assert_eq!(device.voices[0].pw_val, 0x0A56);
+    }
+
+    #[test]
+    fn write_register_sets_envelope_parameters() {
+        let mut device = SIDAudioDevice::new();
+
+        device.write_register(0xD405, 0x3A); // attack=3, decay=0xA
+        device.write_register(0xD406, 0x50); // sustain=5, release=0
+
+        assert_eq!(device.voices[0].attack_add, EG_TABLE[3]);
+        assert_eq!(device.voices[0].decay_sub, EG_TABLE[0xA]);
+        assert_eq!(device.voices[0].sustain_level, 0x111111 * 5);
+        assert_eq!(device.voices[0].release_sub, EG_TABLE[0]);
+    }
+
+    #[test]
+    fn set_control_register_gate_on_starts_attack() {
+        let mut device = SIDAudioDevice::new();
+
+        device.write_register(0xD404, 0x11); // wave=Triangle, gate=1
+
+        assert!(matches!(device.voices[0].state, VoiceState::Attack));
+        assert!(device.voices[0].gate);
+    }
+
+    #[test]
+    fn set_control_register_gate_off_after_attack_moves_to_release() {
+        let mut device = SIDAudioDevice::new();
+        device.write_register(0xD404, 0x11); // gate on -> Attack
+        device.write_register(0xD404, 0x10); // gate off (wave unchanged)
+
+        assert!(matches!(device.voices[0].state, VoiceState::Release));
+        assert!(!device.voices[0].gate);
+    }
+
+    #[test]
+    fn set_control_register_test_bit_resets_waveform_counter() {
+        let mut device = SIDAudioDevice::new();
+        device.voices[0].wf_cnt = 0xABCDEF;
+
+        device.write_register(0xD404, 0x09); // gate=1, test=1
+
+        assert_eq!(device.voices[0].wf_cnt, 0);
+        assert!(device.voices[0].test);
+    }
+
+    #[test]
+    fn write_register_0xd418_sets_volume_and_voice3_mute() {
+        let mut device = SIDAudioDevice::new();
+
+        device.write_register(0xD418, 0x8F); // volume=0xF, mute bit set
+
+        assert_eq!(device.volume, 0x0F);
+        assert!(device.voices[2].mute);
+    }
+
+    #[test]
+    fn write_register_0xd418_switching_to_none_zeroes_filter_coefficients() {
+        let mut device = SIDAudioDevice::new();
+        device.write_register(0xD418, 0x10); // filter type bits = 1 -> Lowpass
+        assert!(matches!(device.filter_type, FilterType::Lowpass));
+
+        device.write_register(0xD418, 0x00); // filter type bits = 0 -> None
+
+        assert!(matches!(device.filter_type, FilterType::None));
+        assert_eq!(device.d1, 0.0);
+        assert_eq!(device.d2, 0.0);
+        assert_eq!(device.g1, 0.0);
+        assert_eq!(device.g2, 0.0);
+        assert_eq!(device.iir_att, 0.0);
+    }
+
+    #[test]
+    fn write_register_0xd418_switching_to_all_sets_full_iir_attenuation() {
+        let mut device = SIDAudioDevice::new();
+
+        device.write_register(0xD418, 0x70); // filter type bits = 7 -> All
+
+        assert!(matches!(device.filter_type, FilterType::All));
+        assert_eq!(device.iir_att, 1.0);
+        assert_eq!(device.d1, 0.0);
+        assert_eq!(device.g1, 0.0);
+    }
+
+    #[test]
+    fn read_register_returns_last_written_byte_for_write_only_registers() {
+        let mut device = SIDAudioDevice::new();
+        device.write_register(0xD400, 0x42);
+
+        assert_eq!(device.read_register(0xD400), 0x42);
+    }
+
+    #[test]
+    fn read_register_envelope_registers_reset_last_sid_byte() {
+        let mut device = SIDAudioDevice::new();
+        device.write_register(0xD400, 0x99); // sets last_sid_byte = 0x99
+
+        let val = device.read_register(0xD419);
+
+        assert_eq!(val, 0xFF);
+        assert_eq!(device.read_register(0xD400), 0x00); // last_sid_byte was reset
+    }
+
+    #[test]
+    fn read_register_mirrors_addresses_above_0xd420() {
+        let mut device = SIDAudioDevice::new();
+        device.write_register(0xD400, 0x77);
+
+        assert_eq!(device.read_register(0xD420), device.read_register(0xD400));
+    }
+
+    #[test]
+    fn update_appends_volume_sample_and_advances_index() {
+        let mut device = SIDAudioDevice::new();
+        device.volume = 7;
+
+        device.update();
+
+        assert_eq!(device.sample_buffer[0], 7);
+        assert_eq!(device.sample_idx, 1);
+    }
+}

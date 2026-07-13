@@ -1451,3 +1451,261 @@ pub fn get_instruction(opcode: u8) -> Option<(Op, u8, bool, AddrMode)> {
         /* ISC_abx */ 0xFF => (Op::ISC, 7, true, AddrMode::AbsoluteIndexedX(false)),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use c64::memory;
+
+    // CPU with real RAM attached but no VIC/CIA/SID - enough for addressing modes
+    // and opcodes that don't touch memory-mapped I/O (io_on defaults to false anyway)
+    fn new_cpu_with_ram() -> cpu::CPUShared {
+        let c = cpu::CPU::new_shared();
+        c.borrow_mut().mem_ref = Some(memory::Memory::new_shared());
+        c
+    }
+
+    #[test]
+    fn calculate_cycles_implied() {
+        let mut instr = Instruction::new(); // defaults to AddrMode::Implied
+        instr.calculate_cycles(2, false); // e.g. NOP
+
+        assert_eq!(instr.cycles_to_fetch, 0);
+        assert_eq!(instr.cycles_to_rmw, 0);
+        assert_eq!(instr.cycles_to_run, 1);
+    }
+
+    #[test]
+    fn calculate_cycles_absolute_non_rmw() {
+        let mut instr = Instruction::new();
+        instr.addr_mode = AddrMode::Absolute;
+        instr.calculate_cycles(4, false); // e.g. LDA abs
+
+        assert_eq!(instr.cycles_to_fetch, 2);
+        assert_eq!(instr.cycles_to_rmw, 0);
+        assert_eq!(instr.cycles_to_run, 1);
+    }
+
+    #[test]
+    fn calculate_cycles_absolute_rmw() {
+        let mut instr = Instruction::new();
+        instr.addr_mode = AddrMode::Absolute;
+        instr.calculate_cycles(6, true); // e.g. ASL abs
+
+        assert_eq!(instr.cycles_to_fetch, 2);
+        assert_eq!(instr.cycles_to_rmw, 2);
+        assert_eq!(instr.cycles_to_run, 1);
+    }
+
+    #[test]
+    fn calculate_cycles_indexed_indirect_x() {
+        let mut instr = Instruction::new();
+        instr.addr_mode = AddrMode::IndexedIndirectX;
+        instr.calculate_cycles(6, false); // e.g. ORA izx
+
+        assert_eq!(instr.cycles_to_fetch, 4);
+        assert_eq!(instr.cycles_to_run, 1);
+    }
+
+    #[test]
+    fn get_instruction_decodes_lda_immediate() {
+        let (op, cycles, is_rmw, mode) = get_instruction(0xA9).unwrap();
+        assert!(matches!(op, Op::LDA));
+        assert_eq!(cycles, 2);
+        assert!(!is_rmw);
+        assert!(matches!(mode, AddrMode::Immediate));
+    }
+
+    #[test]
+    fn get_instruction_decodes_brk() {
+        let (op, cycles, is_rmw, mode) = get_instruction(0x00).unwrap();
+        assert!(matches!(op, Op::BRK));
+        assert_eq!(cycles, 7);
+        assert!(!is_rmw);
+        assert!(matches!(mode, AddrMode::Implied));
+    }
+
+    #[test]
+    fn get_instruction_flags_read_modify_write_opcodes() {
+        let (op, _, is_rmw, _) = get_instruction(0x0E).unwrap(); // ASL abs
+        assert!(matches!(op, Op::ASL));
+        assert!(is_rmw);
+    }
+
+    #[test]
+    fn get_instruction_covers_every_opcode_byte() {
+        for opcode in 0u16..=255 {
+            assert!(
+                get_instruction(opcode as u8).is_some(),
+                "opcode {:#04X} not mapped",
+                opcode
+            );
+        }
+    }
+
+    #[test]
+    fn fetch_operand_addr_absolute_reads_le_address() {
+        let cpu_shared = new_cpu_with_ram();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.pc = 0x1000;
+        cpu.write_byte(0x1000, 0x34);
+        cpu.write_byte(0x1001, 0x12);
+        cpu.instruction.addr_mode = AddrMode::Absolute;
+        cpu.instruction.cycles_to_fetch = 2;
+
+        assert!(!fetch_operand_addr(&mut *cpu)); // cycle 2: low byte
+        assert!(fetch_operand_addr(&mut *cpu)); // cycle 1: high byte
+        assert_eq!(cpu.instruction.operand_addr, 0x1234);
+        assert_eq!(cpu.pc, 0x1002);
+    }
+
+    #[test]
+    fn fetch_operand_addr_zeropage_reads_one_byte() {
+        let cpu_shared = new_cpu_with_ram();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.pc = 0x1000;
+        cpu.write_byte(0x1000, 0x42);
+        cpu.instruction.addr_mode = AddrMode::Zeropage;
+        cpu.instruction.cycles_to_fetch = 1;
+
+        assert!(fetch_operand_addr(&mut *cpu));
+        assert_eq!(cpu.instruction.operand_addr, 0x0042);
+    }
+
+    #[test]
+    fn fetch_operand_addr_zeropage_indexed_x_wraps_within_page() {
+        let cpu_shared = new_cpu_with_ram();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.pc = 0x1000;
+        cpu.write_byte(0x1000, 0xFF);
+        cpu.x = 0x02;
+        cpu.instruction.addr_mode = AddrMode::ZeropageIndexedX;
+        cpu.instruction.cycles_to_fetch = 2;
+
+        assert!(!fetch_operand_addr(&mut *cpu)); // cycle 2: read base address
+        assert!(fetch_operand_addr(&mut *cpu)); // cycle 1: add X, wrap within zero page
+        assert_eq!(cpu.instruction.operand_addr, 0x0001);
+    }
+
+    #[test]
+    fn fetch_operand_addr_absolute_indexed_x_shortcuts_without_page_cross() {
+        let cpu_shared = new_cpu_with_ram();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.pc = 0x1000;
+        cpu.write_byte(0x1000, 0x01); // low byte
+        cpu.write_byte(0x1001, 0x20); // high byte
+        cpu.x = 0x01; // 0x01 + 0x01 stays on the same page
+        cpu.instruction.addr_mode = AddrMode::AbsoluteIndexedX(true); // extra cycle only on page cross
+        cpu.instruction.cycles_to_fetch = 3;
+
+        assert!(!fetch_operand_addr(&mut *cpu)); // cycle 3: fetch low byte
+        assert!(fetch_operand_addr(&mut *cpu)); // cycle 2: fetch high byte, add X, no cross -> shortcut
+        assert!(!cpu.instruction.zp_crossed);
+        assert_eq!(cpu.instruction.operand_addr, 0x2002);
+    }
+
+    #[test]
+    fn fetch_operand_addr_absolute_indexed_x_extends_on_page_cross() {
+        let cpu_shared = new_cpu_with_ram();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.pc = 0x1000;
+        cpu.write_byte(0x1000, 0xFF); // low byte
+        cpu.write_byte(0x1001, 0x20); // high byte
+        cpu.x = 0x02; // 0xFF + 0x02 crosses into the next page
+        cpu.instruction.addr_mode = AddrMode::AbsoluteIndexedX(true);
+        cpu.instruction.cycles_to_fetch = 3;
+
+        assert!(!fetch_operand_addr(&mut *cpu)); // cycle 3: fetch low byte
+        assert!(!fetch_operand_addr(&mut *cpu)); // cycle 2: fetch high byte, page cross keeps the extra cycle
+        assert!(cpu.instruction.zp_crossed);
+        assert!(fetch_operand_addr(&mut *cpu)); // cycle 1: apply +0x100 correction
+        assert_eq!(cpu.instruction.operand_addr, 0x2101);
+    }
+
+    #[test]
+    fn run_lda_immediate_loads_accumulator_and_sets_flags() {
+        let cpu_shared = new_cpu_with_ram();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.pc = 0x1000;
+        cpu.write_byte(0x1000, 0x80); // negative value
+        cpu.instruction.opcode = Op::LDA;
+        cpu.instruction.addr_mode = AddrMode::Immediate;
+        cpu.instruction.cycles_to_run = 1;
+
+        assert!(run(&mut *cpu));
+        assert_eq!(cpu.a, 0x80);
+        assert!(cpu.get_status_flag(cpu::StatusFlag::Negative));
+        assert_eq!(cpu.pc, 0x1001);
+    }
+
+    #[test]
+    fn run_sta_writes_accumulator_to_operand_address() {
+        let cpu_shared = new_cpu_with_ram();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.a = 0x77;
+        cpu.instruction.opcode = Op::STA;
+        cpu.instruction.addr_mode = AddrMode::Absolute;
+        cpu.instruction.operand_addr = 0x3000;
+        cpu.instruction.cycles_to_run = 1;
+
+        assert!(run(&mut *cpu));
+        assert_eq!(cpu.read_byte(0x3000), 0x77);
+    }
+
+    #[test]
+    fn run_inx_wraps_and_sets_zero_flag() {
+        let cpu_shared = new_cpu_with_ram();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.x = 0xFF;
+        cpu.instruction.opcode = Op::INX;
+        cpu.instruction.addr_mode = AddrMode::Implied;
+        cpu.instruction.cycles_to_run = 1;
+
+        assert!(run(&mut *cpu));
+        assert_eq!(cpu.x, 0x00);
+        assert!(cpu.get_status_flag(cpu::StatusFlag::Zero));
+    }
+
+    #[test]
+    fn run_clc_and_sec_toggle_carry_flag() {
+        let cpu_shared = new_cpu_with_ram();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.set_status_flag(cpu::StatusFlag::Carry, true);
+        cpu.instruction.opcode = Op::CLC;
+        cpu.instruction.addr_mode = AddrMode::Implied;
+        cpu.instruction.cycles_to_run = 1;
+        assert!(run(&mut *cpu));
+        assert!(!cpu.get_status_flag(cpu::StatusFlag::Carry));
+
+        cpu.instruction.opcode = Op::SEC;
+        cpu.instruction.cycles_to_run = 1;
+        assert!(run(&mut *cpu));
+        assert!(cpu.get_status_flag(cpu::StatusFlag::Carry));
+    }
+
+    #[test]
+    fn run_cmp_sets_carry_when_accumulator_is_greater_or_equal() {
+        let cpu_shared = new_cpu_with_ram();
+        let mut cpu = cpu_shared.borrow_mut();
+
+        cpu.pc = 0x1000;
+        cpu.a = 0x10;
+        cpu.write_byte(0x1000, 0x05);
+        cpu.instruction.opcode = Op::CMP;
+        cpu.instruction.addr_mode = AddrMode::Immediate;
+        cpu.instruction.cycles_to_run = 1;
+
+        assert!(run(&mut *cpu));
+        assert!(cpu.get_status_flag(cpu::StatusFlag::Carry));
+        assert_eq!(cpu.a, 0x10); // CMP doesn't modify the accumulator
+    }
+}

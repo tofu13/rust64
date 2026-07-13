@@ -461,3 +461,122 @@ impl IO {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // process_key/process_joystick only touch CIA's public key_matrix/rev_matrix/
+    // joystick fields, so a bare CIA (no mem/cpu/vic references) is enough here -
+    // update()/check_restore_key() need a real minifb::Window and are left untested.
+
+    #[test]
+    fn keycode_to_c64_maps_known_keys() {
+        let io = IO::new();
+        assert_eq!(io.keycode_to_c64(Key::A), 0x0A);
+        assert_eq!(io.keycode_to_c64(Key::Enter), 0x01);
+    }
+
+    #[test]
+    fn keycode_to_c64_sets_shift_flag_for_shifted_keys() {
+        let io = IO::new();
+        assert_eq!(io.keycode_to_c64(Key::F2), 0x84);
+    }
+
+    #[test]
+    fn keycode_to_c64_returns_ff_for_unmapped_keys() {
+        let io = IO::new();
+        assert_eq!(io.keycode_to_c64(Key::F11), 0xFF);
+    }
+
+    #[test]
+    fn on_key_press_clears_matrix_bits_for_pressed_key() {
+        let mut cia_shared = cia::CIA::new_shared(true);
+        let mut io = IO::new();
+
+        io.on_key_press(Key::A, &mut cia_shared);
+
+        let cia = cia_shared.borrow();
+        assert_eq!(cia.key_matrix[1], 0xFB);
+        assert_eq!(cia.rev_matrix[2], 0xFD);
+    }
+
+    #[test]
+    fn on_key_release_restores_matrix_bits() {
+        let mut cia_shared = cia::CIA::new_shared(true);
+        let mut io = IO::new();
+
+        io.on_key_press(Key::A, &mut cia_shared);
+        io.on_key_release(Key::A, &mut cia_shared);
+
+        let cia = cia_shared.borrow();
+        assert_eq!(cia.key_matrix[1], 0xFF);
+        assert_eq!(cia.rev_matrix[2], 0xFF);
+    }
+
+    #[test]
+    fn on_key_press_is_a_no_op_while_key_is_already_held() {
+        let mut cia_shared = cia::CIA::new_shared(true);
+        let mut io = IO::new();
+
+        io.on_key_press(Key::A, &mut cia_shared);
+        // simulate external interference, then press again - keyboard_state
+        // still thinks the key is held, so this must stay a no-op
+        cia_shared.borrow_mut().key_matrix[1] = 0xFF;
+        io.on_key_press(Key::A, &mut cia_shared);
+
+        assert_eq!(cia_shared.borrow().key_matrix[1], 0xFF);
+    }
+
+    #[test]
+    fn shifted_key_press_sets_extra_shift_matrix_bits() {
+        let mut cia_shared = cia::CIA::new_shared(true);
+        let mut io = IO::new();
+
+        io.on_key_press(Key::F2, &mut cia_shared);
+
+        let cia = cia_shared.borrow();
+        assert_eq!(cia.key_matrix[6], 0xEF); // shift row bit cleared
+        assert_eq!(cia.key_matrix[0], 0xEF); // F2's own matrix bit cleared
+        assert_eq!(cia.rev_matrix[4], 0xBE); // both bits land on the same row here
+        assert_eq!(cia.key_matrix[1], 0xFF); // untouched row unaffected
+    }
+
+    #[test]
+    fn joystick_press_and_release_roundtrip_on_default_port() {
+        let mut cia_shared = cia::CIA::new_shared(true);
+        let mut io = IO::new(); // joy_port1 defaults to false -> port 2
+
+        io.process_joystick(true, Key::NumPad2, &mut cia_shared); // down
+        assert_eq!(cia_shared.borrow().joystick_2, 0xFD);
+        assert_eq!(cia_shared.borrow().joystick_1, 0xFF);
+
+        io.process_joystick(false, Key::NumPad2, &mut cia_shared);
+        assert_eq!(cia_shared.borrow().joystick_2, 0xFF);
+        assert_eq!(cia_shared.borrow().joystick_1, 0xFF);
+    }
+
+    #[test]
+    fn joystick_fire_button_press_and_release() {
+        let mut cia_shared = cia::CIA::new_shared(true);
+        let mut io = IO::new();
+
+        io.process_joystick(true, Key::RightCtrl, &mut cia_shared);
+        assert_eq!(cia_shared.borrow().joystick_2, 0xEF); // fire bit cleared
+
+        io.process_joystick(false, Key::RightCtrl, &mut cia_shared);
+        assert_eq!(cia_shared.borrow().joystick_2, 0xFF);
+    }
+
+    #[test]
+    fn joystick_uses_port1_when_joy_port1_flag_is_set() {
+        let mut cia_shared = cia::CIA::new_shared(true);
+        let mut io = IO::new();
+        io.joy_port1 = true; // private field, accessible within this module
+
+        io.process_joystick(true, Key::NumPad8, &mut cia_shared); // up
+
+        assert_eq!(cia_shared.borrow().joystick_1, 0xFE);
+        assert_eq!(cia_shared.borrow().joystick_2, 0xFF); // untouched
+    }
+}
