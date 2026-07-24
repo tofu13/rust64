@@ -42,6 +42,8 @@ pub struct C64 {
     powered_on: bool,
     boot_complete: bool,
     cycle_count: u32,
+
+    mute: bool,
 }
 
 impl C64 {
@@ -50,6 +52,7 @@ impl C64 {
         debugger_on: bool,
         prg_to_load: &str,
         crt_to_load: &str,
+        mute: bool,
     ) -> C64 {
         let memory = memory::Memory::new_shared();
         let vic = vic::VIC::new_shared();
@@ -87,6 +90,7 @@ impl C64 {
             powered_on: false,
             boot_complete: false,
             cycle_count: 0,
+            mute,
         };
 
         c64.main_window.set_position(75, 20);
@@ -216,7 +220,9 @@ impl C64 {
         }
 
         // update SDL2 audio buffers
-        self.sid.borrow_mut().update_audio();
+        if !self.mute {
+            self.sid.borrow_mut().update_audio();
+        }
     }
 
     // *** private functions *** //
