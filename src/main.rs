@@ -30,6 +30,14 @@ struct Args {
     /// Enable debugger
     #[arg(short, long)]
     debugger: bool,
+
+    /// Disable sound
+    #[arg[short, long]]
+    mute: bool,
+
+    /// Warp mode
+    #[arg[short, long]]
+    warp: bool,
 }
 
 #[cfg(debug_assertions)]
@@ -71,7 +79,14 @@ fn main() {
     let crt_to_load = if file.ends_with(".crt") { file } else { "" };
     let window_scale = if args.x2 { Scale::X2 } else { Scale::X1 };
 
-    let mut c64 = c64::C64::new(window_scale, args.debugger, prg_to_load, crt_to_load);
+    let mut c64 = c64::C64::new(
+        window_scale,
+        args.debugger,
+        prg_to_load,
+        crt_to_load,
+        args.mute,
+        args.warp,
+    );
     c64.reset();
 
     // main update loop
