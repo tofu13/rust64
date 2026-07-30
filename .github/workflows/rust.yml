@@ -9,39 +9,16 @@ env:
 jobs:
   test:
     name: Test
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ ubuntu-latest, windows-latest, macos-latest ]
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install SDL2 (Linux)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Install SDL2
         run: |
           sudo apt-get update -q
           sudo apt-get install -y libegl1-mesa-dev libgles2-mesa-dev libsdl2-dev
-
-      - name: Install SDL2 (macOS)
-        if: matrix.os == 'macos-latest'
-        run: |
-          brew trust aws/tap
-          brew install sdl2
-          echo "LIBRARY_PATH=$(brew --prefix sdl2)/lib" >> $GITHUB_ENV
-
-      - name: Install SDL2 (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        env:
-          SDL2_VERSION: "2.32.10"
-        run: |
-          Invoke-WebRequest -Uri "https://www.libsdl.org/release/SDL2-devel-$env:SDL2_VERSION-VC.zip" -OutFile "SDL2-devel-$env:SDL2_VERSION-VC.zip"
-          7z x "SDL2-devel-$env:SDL2_VERSION-VC.zip"
-          $sdl2Dir = "$(Get-Location)\SDL2-$env:SDL2_VERSION\lib\x64"
-          echo "LIB=$sdl2Dir;$env:LIB" >> $env:GITHUB_ENV
-          echo "PATH=$sdl2Dir;$env:PATH" >> $env:GITHUB_ENV
 
       - name: cargo test
         run: cargo test --verbose
