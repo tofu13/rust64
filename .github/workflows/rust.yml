@@ -28,4 +28,17 @@ jobs:
       - uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Generate coverage report
-        run: cargo llvm-cov --bin rust64 --summary-only
+        run: cargo llvm-cov --bin rust64 --cobertura --output-path cobertura.xml
+
+      - name: Code Coverage Summary Report
+        uses: irongut/CodeCoverageSummary@v1.3.0
+        with:
+          filename: cobertura.xml
+          badge: true
+          format: markdown
+          output: file
+          indicators: false
+          hide_complexity: true
+
+      - name: Add coverage to job summary
+        run: cat code-coverage-results.md >> "$GITHUB_STEP_SUMMARY"
