@@ -17,13 +17,15 @@ mod vic_tables;
 use debugger;
 use log::info;
 use minifb::*;
+use std::collections::VecDeque;
 use utils;
 
 pub const SCREEN_WIDTH: usize = 384; // extend 20 pixels left and right for the borders
 pub const SCREEN_HEIGHT: usize = 272; // extend 36 pixels top and down for the borders
 
 // PAL clock frequency in Hz
-const CLOCK_FREQ: f64 = 1.5 * 985248.0;
+const CLOCK_FREQ: f64 = 985248.0;
+pub const RATIO_MOVING_AVERAGE_COUNT: usize = 10; // Number of values for calculating average ratio
 
 pub struct C64 {
     pub main_window: Window,
@@ -45,6 +47,9 @@ pub struct C64 {
 
     mute: bool,
     warp: bool,
+    sample_count: u32,
+    ratio_buffer: VecDeque<f64>,
+    frame_count: u32,
 }
 
 impl C64 {
@@ -94,9 +99,13 @@ impl C64 {
             cycle_count: 0,
             mute,
             warp,
+            sample_count: 0,
+            ratio_buffer: VecDeque::new(),
+            frame_count: 0,
         };
 
         c64.main_window.set_position(75, 20);
+        c64.main_window.set_target_fps(if warp { 0 } else { 50 });
 
         // cyclic dependencies are not possible in Rust (yet?), so we have
         // to resort to setting references manually
@@ -200,23 +209,40 @@ impl C64 {
                     SCREEN_WIDTH,
                     SCREEN_HEIGHT,
                 );
+                self.frame_count += 1;
                 self.io.update(&self.main_window, &mut self.cia1);
                 self.cia1.borrow_mut().count_tod();
                 self.cia2.borrow_mut().count_tod();
 
+                // region maintenance tasks
+
+                // handle RESTORE key
                 if self.io.check_restore_key(&self.main_window) {
                     self.cpu.borrow_mut().set_nmi(true);
                 }
-            }
-
-            // process special keys: console ASM output and reset switch
-            if self.main_window.is_key_pressed(Key::F11, KeyRepeat::No) {
-                let di = self.cpu.borrow_mut().debug_instr;
-                self.cpu.borrow_mut().debug_instr = !di;
-            }
-
-            if self.main_window.is_key_pressed(Key::F12, KeyRepeat::No) {
-                self.reset();
+                // process F11 for console ASM
+                if self.main_window.is_key_pressed(Key::F11, KeyRepeat::No) {
+                    let di = self.cpu.borrow_mut().debug_instr;
+                    self.cpu.borrow_mut().debug_instr = !di;
+                }
+                // process F12 for reset
+                if self.main_window.is_key_pressed(Key::F12, KeyRepeat::No) {
+                    self.reset();
+                }
+                // get clock ratios and FPS
+                if let Some(elapsed) = self.clock.sample() {
+                    let clock_ratio = self.clock_ratio(elapsed); // Future usage for throttling
+                    let fps = self.frame_count as f64 / elapsed;
+                    self.frame_count = 0;
+                    info!(
+                        "{:.6} second passed - CPU current {:.2}%, CPU average {:.0}%, {:.1} FPS",
+                        elapsed,
+                        clock_ratio * 100.0,
+                        self.average_clock_ratio() * 100.0,
+                        fps,
+                    );
+                }
+                //endregion
             }
 
             self.cycle_count += 1;
@@ -229,6 +255,24 @@ impl C64 {
     }
 
     // *** private functions *** //
+
+    fn clock_ratio(&mut self, elapsed: f64) -> f64 {
+        // Returns a measure of simulation speed vs standard clock
+        let ratio = (self.cycle_count - self.sample_count) as f64 / elapsed / CLOCK_FREQ;
+        self.sample_count = self.cycle_count;
+
+        // Store data for average
+        self.ratio_buffer.push_front(ratio);
+        // Evict oldest sample
+        self.ratio_buffer.truncate(RATIO_MOVING_AVERAGE_COUNT);
+
+        ratio
+    }
+
+    fn average_clock_ratio(&self) -> f64 {
+        // Returns an average measure of simulation speed vs standard clock
+        self.ratio_buffer.iter().sum::<f64>() / (self.ratio_buffer.len() as f64)
+    }
 
     // load a *.prg file
     fn load_prg(&mut self, filename: &str) {
