@@ -105,6 +105,7 @@ impl C64 {
         };
 
         c64.main_window.set_position(75, 20);
+        c64.main_window.set_target_fps(if warp { 0 } else { 50 });
 
         // cyclic dependencies are not possible in Rust (yet?), so we have
         // to resort to setting references manually
