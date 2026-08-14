@@ -210,28 +210,32 @@ impl C64 {
                 self.cia1.borrow_mut().count_tod();
                 self.cia2.borrow_mut().count_tod();
 
+                // region maintenance tasks
+
+                // handle RESTORE key
                 if self.io.check_restore_key(&self.main_window) {
                     self.cpu.borrow_mut().set_nmi(true);
                 }
-            }
-
-            // process special keys: console ASM output and reset switch
-            if self.main_window.is_key_pressed(Key::F11, KeyRepeat::No) {
-                let di = self.cpu.borrow_mut().debug_instr;
-                self.cpu.borrow_mut().debug_instr = !di;
-            }
-
-            if self.main_window.is_key_pressed(Key::F12, KeyRepeat::No) {
-                self.reset();
-            }
-            if let Some(elapsed) = self.clock.sample() {
-                let clock_ratio = self.clock_ratio(elapsed); // Future usage for throttling
-                info!(
-                    "{:.6} second passed - CPU current {:.2}%, average {:.2}%",
-                    elapsed,
-                    clock_ratio * 100.0,
-                    self.average_clock_ratio() * 100.0,
-                );
+                // process F11 for console ASM
+                if self.main_window.is_key_pressed(Key::F11, KeyRepeat::No) {
+                    let di = self.cpu.borrow_mut().debug_instr;
+                    self.cpu.borrow_mut().debug_instr = !di;
+                }
+                // process F12 for reset
+                if self.main_window.is_key_pressed(Key::F12, KeyRepeat::No) {
+                    self.reset();
+                }
+                // get clock ratios
+                if let Some(elapsed) = self.clock.sample() {
+                    let clock_ratio = self.clock_ratio(elapsed); // Future usage for throttling
+                    info!(
+                        "{:.6} second passed - CPU current {:.2}%, average {:.0}%",
+                        elapsed,
+                        clock_ratio * 100.0,
+                        self.average_clock_ratio() * 100.0,
+                    );
+                }
+                //endregion
             }
 
             self.cycle_count += 1;
