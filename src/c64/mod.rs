@@ -49,6 +49,7 @@ pub struct C64 {
     warp: bool,
     sample_count: u32,
     ratio_buffer: VecDeque<f64>,
+    frame_count: u32,
 }
 
 impl C64 {
@@ -100,6 +101,7 @@ impl C64 {
             warp,
             sample_count: 0,
             ratio_buffer: VecDeque::new(),
+            frame_count: 0,
         };
 
         c64.main_window.set_position(75, 20);
@@ -206,6 +208,7 @@ impl C64 {
                     SCREEN_WIDTH,
                     SCREEN_HEIGHT,
                 );
+                self.frame_count += 1;
                 self.io.update(&self.main_window, &mut self.cia1);
                 self.cia1.borrow_mut().count_tod();
                 self.cia2.borrow_mut().count_tod();
@@ -225,14 +228,17 @@ impl C64 {
                 if self.main_window.is_key_pressed(Key::F12, KeyRepeat::No) {
                     self.reset();
                 }
-                // get clock ratios
+                // get clock ratios and FPS
                 if let Some(elapsed) = self.clock.sample() {
                     let clock_ratio = self.clock_ratio(elapsed); // Future usage for throttling
+                    let fps = self.frame_count as f64 / elapsed;
+                    self.frame_count = 0;
                     info!(
-                        "{:.6} second passed - CPU current {:.2}%, average {:.0}%",
+                        "{:.6} second passed - CPU current {:.2}%, CPU average {:.0}%, {:.1} FPS",
                         elapsed,
                         clock_ratio * 100.0,
                         self.average_clock_ratio() * 100.0,
+                        fps,
                     );
                 }
                 //endregion
