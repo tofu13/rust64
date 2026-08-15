@@ -46,7 +46,6 @@ pub struct C64 {
     cycle_count: u32,
 
     mute: bool,
-    warp: bool,
     sample_count: u32,
     ratio_buffer: VecDeque<f64>,
     frame_count: u32,
@@ -83,7 +82,7 @@ impl C64 {
             crt_to_load: String::from(crt_to_load),
             memory: memory.clone(), // shared system memory (RAM, ROM, IO registers)
             io: io::IO::new(),
-            clock: clock::Clock::new(CLOCK_FREQ),
+            clock: clock::Clock::new(),
             cpu: cpu.clone(),
             cia1: cia1.clone(),
             cia2: cia2.clone(),
@@ -98,7 +97,6 @@ impl C64 {
             boot_complete: false,
             cycle_count: 0,
             mute,
-            warp,
             sample_count: 0,
             ratio_buffer: VecDeque::new(),
             frame_count: 0,
@@ -175,78 +173,76 @@ impl C64 {
             }
         }
 
-        // main C64 update - use the clock to time all the operations
-        if self.warp || self.clock.tick() {
-            let mut should_trigger_vblank = false;
+        // main C64 update
+        let mut should_trigger_vblank = false;
 
-            if self
-                .vic
-                .borrow_mut()
-                .update(self.cycle_count, &mut should_trigger_vblank)
-            {
-                self.sid.borrow_mut().update();
-            }
-
-            self.cia1.borrow_mut().process_irq();
-            self.cia2.borrow_mut().process_irq();
-            self.cia1.borrow_mut().update();
-            self.cia2.borrow_mut().update();
-
-            self.cpu.borrow_mut().update(self.cycle_count);
-
-            // update the debugger window if it exists
-            if let Some(ref mut dbg) = self.debugger {
-                dbg.update_vic_window(&mut self.vic);
-                if should_trigger_vblank {
-                    dbg.render(&mut self.cpu, &mut self.memory);
-                }
-            }
-
-            // redraw the screen and process input on VBlank
-            if should_trigger_vblank {
-                let _ = self.main_window.update_with_buffer(
-                    &self.vic.borrow_mut().window_buffer,
-                    SCREEN_WIDTH,
-                    SCREEN_HEIGHT,
-                );
-                self.frame_count += 1;
-                self.io.update(&self.main_window, &mut self.cia1);
-                self.cia1.borrow_mut().count_tod();
-                self.cia2.borrow_mut().count_tod();
-
-                // region maintenance tasks
-
-                // handle RESTORE key
-                if self.io.check_restore_key(&self.main_window) {
-                    self.cpu.borrow_mut().set_nmi(true);
-                }
-                // process F11 for console ASM
-                if self.main_window.is_key_pressed(Key::F11, KeyRepeat::No) {
-                    let di = self.cpu.borrow_mut().debug_instr;
-                    self.cpu.borrow_mut().debug_instr = !di;
-                }
-                // process F12 for reset
-                if self.main_window.is_key_pressed(Key::F12, KeyRepeat::No) {
-                    self.reset();
-                }
-                // get clock ratios and FPS
-                if let Some(elapsed) = self.clock.sample() {
-                    let clock_ratio = self.clock_ratio(elapsed); // Future usage for throttling
-                    let fps = self.frame_count as f64 / elapsed;
-                    self.frame_count = 0;
-                    info!(
-                        "{:.6} second passed - CPU current {:.2}%, CPU average {:.0}%, {:.1} FPS",
-                        elapsed,
-                        clock_ratio * 100.0,
-                        self.average_clock_ratio() * 100.0,
-                        fps,
-                    );
-                }
-                //endregion
-            }
-
-            self.cycle_count += 1;
+        if self
+            .vic
+            .borrow_mut()
+            .update(self.cycle_count, &mut should_trigger_vblank)
+        {
+            self.sid.borrow_mut().update();
         }
+
+        self.cia1.borrow_mut().process_irq();
+        self.cia2.borrow_mut().process_irq();
+        self.cia1.borrow_mut().update();
+        self.cia2.borrow_mut().update();
+
+        self.cpu.borrow_mut().update(self.cycle_count);
+
+        // update the debugger window if it exists
+        if let Some(ref mut dbg) = self.debugger {
+            dbg.update_vic_window(&mut self.vic);
+            if should_trigger_vblank {
+                dbg.render(&mut self.cpu, &mut self.memory);
+            }
+        }
+
+        // redraw the screen and process input on VBlank
+        if should_trigger_vblank {
+            let _ = self.main_window.update_with_buffer(
+                &self.vic.borrow_mut().window_buffer,
+                SCREEN_WIDTH,
+                SCREEN_HEIGHT,
+            );
+            self.frame_count += 1;
+            self.io.update(&self.main_window, &mut self.cia1);
+            self.cia1.borrow_mut().count_tod();
+            self.cia2.borrow_mut().count_tod();
+
+            // region maintenance tasks
+
+            // handle RESTORE key
+            if self.io.check_restore_key(&self.main_window) {
+                self.cpu.borrow_mut().set_nmi(true);
+            }
+            // process F11 for console ASM
+            if self.main_window.is_key_pressed(Key::F11, KeyRepeat::No) {
+                let di = self.cpu.borrow_mut().debug_instr;
+                self.cpu.borrow_mut().debug_instr = !di;
+            }
+            // process F12 for reset
+            if self.main_window.is_key_pressed(Key::F12, KeyRepeat::No) {
+                self.reset();
+            }
+            // get clock ratios and FPS
+            if let Some(elapsed) = self.clock.sample() {
+                let clock_ratio = self.clock_ratio(elapsed); // Future usage for throttling
+                let fps = self.frame_count as f64 / elapsed;
+                self.frame_count = 0;
+                info!(
+                    "{:.6} second passed - CPU current {:.2}%, CPU average {:.0}%, {:.1} FPS",
+                    elapsed,
+                    clock_ratio * 100.0,
+                    self.average_clock_ratio() * 100.0,
+                    fps,
+                );
+            }
+            //endregion
+        }
+
+        self.cycle_count += 1;
 
         // update SDL2 audio buffers
         if !self.mute {
